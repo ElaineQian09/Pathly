@@ -197,6 +197,8 @@ Settings should include:
 - talk density
 - quiet mode preference
 
+If a run is already active, settings changes should update the live session immediately rather than waiting for the next launch.
+
 ## Navigation Strategy
 
 The app can and should include a real navigation overlay, but navigation must not dominate the spoken experience.
@@ -479,6 +481,7 @@ Important product constraint:
 
 - Pathly should use walking-style route generation for the running MVP
 - walking and bicycling route modes currently have beta caveats and should be treated carefully in UI copy
+- route generation response should include navigation-ready metadata, not only a display polyline
 
 #### `Navigation SDK for iOS`
 
@@ -569,7 +572,7 @@ Recommended flow:
 3. backend ranks candidates
 4. frontend displays candidates
 5. user selects one route
-6. frontend starts navigation guidance for the chosen route
+6. frontend starts navigation guidance for the chosen route using backend-provided navigation metadata
 7. frontend streams navigation fields back to backend during the run
 
 ### News Flow

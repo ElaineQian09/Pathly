@@ -68,6 +68,8 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] Persist duration default
 - [ ] Persist news categories
 - [ ] Persist news density
+- [ ] Persist talk density default
+- [ ] Persist quiet mode default
 
 ### 2. Route Generation Service
 
@@ -80,6 +82,7 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] Rank loop candidates by fit and coherence
 - [ ] Attach route labels and highlights
 - [ ] Mark route provider source if useful for debugging
+- [ ] Return navigation-ready payload, not just display polyline
 - [ ] Return strong errors for empty or failed generation
 
 #### Loop Generation Logic
@@ -114,6 +117,7 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] Receive `interrupt.voice.end`
 - [ ] Receive `interrupt.text`
 - [ ] Receive `quick_action`
+- [ ] Receive `session.preferences.update`
 - [ ] Receive `session.pause`
 - [ ] Receive `session.resume`
 - [ ] Receive `session.end`
@@ -122,6 +126,7 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] Emit `playback.segment`
 - [ ] Emit `playback.filler`
 - [ ] Emit `interrupt.result`
+- [ ] Emit `session.preferences.updated`
 - [ ] Emit `session.reconnect_required`
 - [ ] Emit `error`
 
@@ -138,6 +143,8 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] `NewsCluster` model
 - [ ] `PlaceCandidate` model
 - [ ] `SessionCheckpoint` model
+- [ ] `SessionPreferences` model
+- [ ] `NavigationPayload` model
 
 ## Route-Aware Enrichment
 
@@ -230,6 +237,8 @@ Backend router should make explicit decisions instead of relying on model intuit
 - [ ] allow `news` only when route state is calm
 - [ ] emit `run_metrics` every 6 to 8 minutes
 - [ ] use `banter` to connect host turns
+- [ ] respect `talkDensity`
+- [ ] respect active `quietMode`
 
 ## Prompt and Turn Composer
 
@@ -296,6 +305,13 @@ Backend router should make explicit decisions instead of relying on model intuit
 - [ ] Map quick actions to router weight changes
 - [ ] Confirm quick action effects in session state
 - [ ] Decay temporary actions such as `quiet_5_min`
+
+### Session Preferences Updates
+
+- [ ] Accept live settings updates over websocket
+- [ ] Validate and persist session-scoped preference overrides
+- [ ] Acknowledge with `session.preferences.updated`
+- [ ] Apply updated preferences to subsequent turn planning immediately
 
 ## Audio and Playback Payloads
 

@@ -49,6 +49,12 @@ This document defines the MVP contract between the iOS client and the backend fo
 - `medium`
 - `heavy`
 
+### TalkDensity
+
+- `low`
+- `medium`
+- `high`
+
 ### ContentBucket
 
 - `nudge`
@@ -103,7 +109,22 @@ This document defines the MVP contract between the iOS client and the backend fo
   "routeModeDefault": "loop",
   "durationMinutesDefault": 45,
   "newsCategories": ["tech", "world"],
-  "newsDensity": "medium"
+  "newsDensity": "medium",
+  "talkDensityDefault": "medium",
+  "quietModeDefault": false
+}
+```
+
+### SessionPreferences
+
+```json
+{
+  "hostStyle": "sarcastic",
+  "newsCategories": ["tech", "world"],
+  "newsDensity": "medium",
+  "talkDensity": "medium",
+  "quietModeEnabled": false,
+  "quietModeUntil": null
 }
 ```
 
@@ -142,7 +163,50 @@ This document defines the MVP contract between the iOS client and the backend fo
   "startLongitude": -87.6278,
   "endLatitude": 41.8821,
   "endLongitude": -87.6276,
-  "apiSource": "routes_api"
+  "apiSource": "routes_api",
+  "navigationPayload": {
+    "routeToken": null,
+    "legs": [
+      {
+        "legIndex": 0,
+        "distanceMeters": 7100,
+        "durationSeconds": 2760,
+        "steps": [
+          {
+            "stepIndex": 0,
+            "instruction": "Head south on the lakefront trail",
+            "distanceMeters": 850,
+            "durationSeconds": 320,
+            "maneuver": "depart"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### NavigationPayload
+
+```json
+{
+  "routeToken": null,
+  "legs": [
+    {
+      "legIndex": 0,
+      "distanceMeters": 7100,
+      "durationSeconds": 2760,
+      "steps": [
+        {
+          "stepIndex": 0,
+          "instruction": "Head south on the lakefront trail",
+          "distanceMeters": 850,
+          "durationSeconds": 320,
+          "maneuver": "depart"
+        }
+      ]
+    }
+  ]
 }
 ```
 
@@ -363,6 +427,7 @@ Backend owns:
 - route generation orchestration
 - nearby place enrichment when used for local context
 - RSS polling, deduplication, and summarization
+- navigation payload preparation sufficient for client-side guidance bootstrap
 
 ### Live Enrichment Rule
 
@@ -384,7 +449,9 @@ Request:
   "routeModeDefault": "loop",
   "durationMinutesDefault": 45,
   "newsCategories": ["tech", "world"],
-  "newsDensity": "medium"
+  "newsDensity": "medium",
+  "talkDensityDefault": "medium",
+  "quietModeDefault": false
 }
 ```
 
@@ -400,7 +467,9 @@ Response:
     "routeModeDefault": "loop",
     "durationMinutesDefault": 45,
     "newsCategories": ["tech", "world"],
-    "newsDensity": "medium"
+    "newsDensity": "medium",
+    "talkDensityDefault": "medium",
+    "quietModeDefault": false
   }
 }
 ```
@@ -450,7 +519,26 @@ Response:
       "startLatitude": 41.8819,
       "startLongitude": -87.6278,
       "endLatitude": 41.8821,
-      "endLongitude": -87.6276
+      "endLongitude": -87.6276,
+      "navigationPayload": {
+        "routeToken": null,
+        "legs": [
+          {
+            "legIndex": 0,
+            "distanceMeters": 7100,
+            "durationSeconds": 2760,
+            "steps": [
+              {
+                "stepIndex": 0,
+                "instruction": "Head south on the lakefront trail",
+                "distanceMeters": 850,
+                "durationSeconds": 320,
+                "maneuver": "depart"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
@@ -477,7 +565,9 @@ Request:
     "routeModeDefault": "loop",
     "durationMinutesDefault": 45,
     "newsCategories": ["tech", "world"],
-    "newsDensity": "medium"
+    "newsDensity": "medium",
+    "talkDensityDefault": "medium",
+    "quietModeDefault": false
   },
   "routeSelection": {
     "selectedRouteId": "route_loop_01",
@@ -499,7 +589,26 @@ Request:
       "startLatitude": 41.8819,
       "startLongitude": -87.6278,
       "endLatitude": 41.8821,
-      "endLongitude": -87.6276
+      "endLongitude": -87.6276,
+      "navigationPayload": {
+        "routeToken": null,
+        "legs": [
+          {
+            "legIndex": 0,
+            "distanceMeters": 7100,
+            "durationSeconds": 2760,
+            "steps": [
+              {
+                "stepIndex": 0,
+                "instruction": "Head south on the lakefront trail",
+                "distanceMeters": 850,
+                "durationSeconds": 320,
+                "maneuver": "depart"
+              }
+            ]
+          }
+        ]
+      }
     }
   }
 }
@@ -640,6 +749,27 @@ Sent on a cadence during the active run.
 }
 ```
 
+#### `session.preferences.update`
+
+Use this when settings should affect the active run immediately.
+
+```json
+{
+  "type": "session.preferences.update",
+  "payload": {
+    "sessionId": "sess_123",
+    "preferences": {
+      "hostStyle": "sarcastic",
+      "newsCategories": ["tech", "world"],
+      "newsDensity": "medium",
+      "talkDensity": "low",
+      "quietModeEnabled": false,
+      "quietModeUntil": null
+    }
+  }
+}
+```
+
 #### `session.pause`
 
 ```json
@@ -757,6 +887,25 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
 }
 ```
 
+#### `session.preferences.updated`
+
+```json
+{
+  "type": "session.preferences.updated",
+  "payload": {
+    "sessionId": "sess_123",
+    "preferences": {
+      "hostStyle": "sarcastic",
+      "newsCategories": ["tech", "world"],
+      "newsDensity": "medium",
+      "talkDensity": "low",
+      "quietModeEnabled": false,
+      "quietModeUntil": null
+    }
+  }
+}
+```
+
 #### `session.reconnect_required`
 
 ```json
@@ -807,6 +956,7 @@ Frontend owns:
 - local playback queue
 - interruption controls
 - destination autocomplete UX
+- active settings UI that maps to `session.preferences.update`
 
 Backend owns:
 

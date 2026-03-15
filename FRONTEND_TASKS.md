@@ -122,6 +122,8 @@ Frontend should not own:
 - [ ] Persist preferred route mode
 - [ ] Persist default duration
 - [ ] Persist news category choices
+- [ ] Persist talk density default
+- [ ] Persist quiet mode default
 - [ ] Persist last successful route selection if useful
 
 ## Data Models To Define
@@ -140,6 +142,8 @@ Frontend should not own:
 - [ ] `TranscriptPreview`
 - [ ] `QuickAction`
 - [ ] `InterruptState`
+- [ ] `SessionPreferences`
+- [ ] `NavigationPayload`
 
 ## Permissions
 
@@ -303,7 +307,7 @@ Frontend should not own:
 - [ ] Edit talk density
 - [ ] Edit quiet mode preference
 - [ ] Persist changes
-- [ ] Push active changes to backend if a run is live
+- [ ] Push active changes to backend if a run is live using `session.preferences.update`
 
 ## Run-Time Interaction
 
@@ -377,6 +381,7 @@ Frontend should not own:
 - [ ] Send `interrupt.voice.end`
 - [ ] Send `interrupt.text`
 - [ ] Send `quick_action`
+- [ ] Send `session.preferences.update`
 - [ ] Send `session.pause`
 - [ ] Send `session.resume`
 - [ ] Send `session.end`
@@ -385,6 +390,7 @@ Frontend should not own:
 - [ ] Handle `playback.segment`
 - [ ] Handle `playback.filler`
 - [ ] Handle `interrupt.result`
+- [ ] Handle `session.preferences.updated`
 - [ ] Handle `session.reconnect_required`
 - [ ] Handle `error`
 
@@ -417,6 +423,7 @@ Each active-run snapshot should include:
 ## Navigation SDK Integration
 
 - [ ] Start guidance once route is selected for run
+- [ ] Read navigation-ready payload returned with selected route
 - [ ] Surface next instruction into UI state
 - [ ] Surface off-route state into UI state
 - [ ] Surface remaining distance and ETA into UI state
