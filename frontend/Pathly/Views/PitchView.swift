@@ -4,40 +4,65 @@ struct PitchView: View {
     @ObservedObject var store: AppStore
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.09, green: 0.13, blue: 0.20), Color(red: 0.11, green: 0.39, blue: 0.36)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
+        ZStack(alignment: .topLeading) {
+            PathlyBackground()
 
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Pathly")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.84))
+            ContentColumn(maxWidth: 760) {
+                VStack(alignment: .leading, spacing: 28) {
+                    Spacer(minLength: 30)
 
-                Spacer()
+                    Text("PATHLY")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(PathlyPalette.textSecondary)
 
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Your run, turned into a live podcast.")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("Pick Maya and Theo's vibe, lock in a route, and let the show react to your run in real time.")
-                        .font(.title3)
-                        .foregroundStyle(Color.white.opacity(0.74))
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("A live running show for the road ahead.")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundStyle(PathlyPalette.textPrimary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("Maya and Theo guide the route, layer in local context, and keep the run moving without turning the screen into a dashboard.")
+                            .font(.callout)
+                            .foregroundStyle(PathlyPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        featureRow("English-first, content-first")
+                        featureRow("Key-turn navigation only when it matters")
+                        featureRow("Live preferences stay synced during a run")
+                    }
+
+                    Spacer(minLength: 0)
                 }
-
-                Spacer()
-
-                Button {
-                    store.continueFromPitch()
-                } label: {
-                    Text("Start setup")
-                        .font(.headline)
-                        .foregroundStyle(Color.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(red: 0.80, green: 0.96, blue: 0.85)))
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            ContentColumn(maxWidth: 760) {
+                StickyFooter {
+                    PrimaryActionButton(title: "Start setup", systemImage: "arrow.right") {
+                        store.continueFromPitch()
+                    }
                 }
             }
-            .padding(28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func featureRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(PathlyPalette.accent)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(PathlyPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

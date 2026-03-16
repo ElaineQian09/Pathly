@@ -3,6 +3,7 @@ import SwiftUI
 struct RunView: View {
     @ObservedObject var store: AppStore
     @State private var isTextInterruptPresented = false
+    @FocusState private var isTextInterruptFocused: Bool
 
     var body: some View {
         ZStack {
@@ -13,102 +14,171 @@ struct RunView: View {
                 navigationService: store.navigationService
             )
             .ignoresSafeArea()
-
-            LinearGradient(colors: [Color.black.opacity(0.55), .clear, Color.black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-
-            VStack(spacing: 14) {
+            .overlay(alignment: .top) {
                 topOverlay
-                Spacer()
-                if store.sessionStatus == .reconnecting {
-                    reconnectBanner
-                }
-                transcriptStrip
-                quickActions
-                bottomControls
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
-            .padding(18)
 
             if let countdownValue = store.countdownValue {
                 countdownOverlay(value: countdownValue)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom) {
+            bottomTray
+        }
         .sheet(isPresented: $isTextInterruptPresented) {
             textInterruptSheet
-                .presentationDetents([.medium])
+                .presentationDetents([.fraction(0.34), .medium])
+                .presentationDragIndicator(.visible)
         }
     }
 
     private var topOverlay: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .top) {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                GlassCard(padding: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(store.navSnapshot.nextInstruction)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        HStack {
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(PathlyPalette.mapTextPrimary)
+                            .lineLimit(2)
+
+                        HStack(spacing: 12) {
                             Label(store.navSnapshot.remainingDistanceMeters.formattedDistance, systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                             Label(store.navSnapshot.remainingDurationSeconds.asClock, systemImage: "clock")
                             Text(store.navSnapshot.offRoute ? "Off route" : "On route")
                         }
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.white.opacity(0.72))
+                        .foregroundStyle(PathlyPalette.mapTextSecondary)
+
                         if let navigationStatusMessage = store.navigationStatusMessage {
                             Text(navigationStatusMessage)
                                 .font(.caption2)
-                                .foregroundStyle(Color.white.opacity(0.65))
+                                .foregroundStyle(PathlyPalette.mapTextSecondary.opacity(0.9))
+                                .lineLimit(1)
                         }
                     }
                 }
 
-                VStack(spacing: 10) {
-                    Button {
+                VStack(spacing: 8) {
+                    CircularGlassButton(systemImage: "gearshape") {
                         store.openSettings()
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(.white)
-                            .padding(12)
-                            .background(Circle().fill(Color.black.opacity(0.35)))
                     }
-                    Button {
+                    CircularGlassButton(systemImage: "chevron.left") {
                         store.returnToRouteSelection()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .foregroundStyle(.white)
-                            .padding(12)
-                            .background(Circle().fill(Color.black.opacity(0.35)))
                     }
                 }
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 if let currentSpeaker = store.currentSpeaker {
-                    Text(currentSpeaker.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Color.teal.opacity(0.85)))
+                    speakerPill(currentSpeaker.displayName, tint: PathlyPalette.accent)
                 }
                 if store.navSnapshot.atTurnaroundPoint {
-                    Text("Turnaround")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Color.orange.opacity(0.8)))
+                    speakerPill("Turnaround", tint: PathlyPalette.warning)
                 }
                 Spacer()
+            }
+
+            if let runStateSummary = store.runStateSummary {
+                GlassCard(padding: 12) {
+                    Text(runStateSummary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(PathlyPalette.mapTextPrimary)
+                }
             }
         }
     }
 
-    private var reconnectBanner: some View {
-        GlassCard {
-            Text(store.reconnectReason.map { "Reconnecting: \($0)" } ?? "Reconnecting session…")
-                .foregroundStyle(.white)
+    private var bottomTray: some View {
+        VStack(spacing: 12) {
+            if !store.transcriptStrip.isEmpty {
+                transcriptStrip
+                    .padding(.horizontal, 16)
+            }
+
+            quickActions
+                .padding(.horizontal, 16)
+
+            GlassCard(padding: 14) {
+                VStack(spacing: 14) {
+                    HStack(spacing: 10) {
+                        MetricPill(title: "Elapsed", value: store.motionSnapshot.elapsedSeconds.asClock)
+                        MetricPill(title: "Pace", value: store.motionSnapshot.paceDisplay)
+                        MetricPill(title: "Distance", value: store.motionSnapshot.distanceMeters.formattedDistance)
+                    }
+
+                    HStack(spacing: 12) {
+                        actionButton(
+                            title: store.voiceInterruptService.isRecording ? "Send" : "Interrupt",
+                            systemImage: store.voiceInterruptService.isRecording ? "waveform.circle.fill" : "mic.fill",
+                            tint: PathlyPalette.destructive,
+                            isEnabled: store.canUseLiveControls
+                        ) {
+                            store.toggleVoiceInterrupt()
+                        }
+
+                        actionButton(
+                            title: "Text",
+                            systemImage: "text.bubble.fill",
+                            tint: Color.white.opacity(0.92),
+                            foreground: PathlyPalette.textPrimary,
+                            isEnabled: store.canUseLiveControls
+                        ) {
+                            isTextInterruptPresented = true
+                        }
+
+                        actionButton(
+                            title: store.runPrimaryControlState.title,
+                            systemImage: store.runPrimaryControlState.systemImage,
+                            tint: controlTint,
+                            foreground: controlForeground,
+                            isEnabled: store.runPrimaryControlState.isEnabled
+                        ) {
+                            store.handleRunPrimaryControlTap()
+                        }
+                    }
+
+                    if store.sessionStatus != .idle && store.sessionStatus != .ended {
+                        Button(role: .destructive) {
+                            store.endRun()
+                        } label: {
+                            Text("End session")
+                                .font(.footnote.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(Color.white.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(PathlyPalette.mapTextPrimary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
         }
+        .padding(.top, 8)
+        .background(
+            LinearGradient(
+                colors: [Color.clear, Color.black.opacity(0.06), Color.black.opacity(0.18)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private func speakerPill(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(PathlyPalette.mapTextPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(tint.opacity(0.92)))
     }
 
     private var transcriptStrip: some View {
@@ -117,16 +187,20 @@ struct RunView: View {
                 ForEach(store.transcriptStrip) { item in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(item.speaker.displayName)
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.white.opacity(0.78))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PathlyPalette.mapTextSecondary)
                         Text(item.text)
                             .font(.subheadline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(PathlyPalette.mapTextPrimary)
                             .lineLimit(2)
                     }
                     .padding(14)
-                    .frame(width: 250, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color.black.opacity(0.35)))
+                    .frame(width: 224, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                    )
                 }
             }
         }
@@ -134,153 +208,123 @@ struct RunView: View {
 
     private var quickActions: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 ForEach(QuickAction.allCases) { action in
                     Button {
                         store.sendQuickAction(action)
                     } label: {
                         Text(action.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(PathlyPalette.mapTextPrimary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
-                            .background(Capsule().fill(Color.white.opacity(0.14)))
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .disabled(!store.canUseLiveControls)
+                    .opacity(store.canUseLiveControls ? 1 : 0.58)
                 }
             }
         }
     }
 
-    private var bottomControls: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 8) {
-                MetricPill(title: "Elapsed", value: store.motionSnapshot.elapsedSeconds.asClock)
-                MetricPill(title: "Pace", value: store.motionSnapshot.paceDisplay)
-                MetricPill(title: "Distance", value: store.motionSnapshot.distanceMeters.formattedDistance)
+    private func actionButton(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        foreground: Color = .white,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
             }
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(tint)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.58)
+    }
 
-            HStack(spacing: 14) {
-                Button {
-                    store.toggleVoiceInterrupt()
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: store.voiceInterruptService.isRecording ? "waveform.circle.fill" : "mic.circle.fill")
-                            .font(.system(size: 34))
-                        Text(store.voiceInterruptService.isRecording ? "Send" : "Interrupt")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(RoundedRectangle(cornerRadius: 22).fill(Color.pink.opacity(0.75)))
-                }
-
-                Button {
-                    isTextInterruptPresented = true
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "text.bubble.fill")
-                            .font(.system(size: 30))
-                        Text("Text")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(RoundedRectangle(cornerRadius: 22).fill(Color.black.opacity(0.38)))
-                }
-
-                Button {
-                    if store.sessionStatus == .idle {
-                        store.startRun()
-                    } else {
-                        store.pauseOrResumeRun()
-                    }
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: controlIcon)
-                            .font(.system(size: 30))
-                        Text(controlText)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(store.sessionStatus == .idle ? .black : .white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(RoundedRectangle(cornerRadius: 22).fill(store.sessionStatus == .idle ? Color(red: 0.80, green: 0.96, blue: 0.85) : Color.white.opacity(0.14)))
-                }
-            }
-
-            if store.sessionStatus != .idle {
-                Button(role: .destructive) {
-                    store.endRun()
-                } label: {
-                    Text("End session")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.22)))
-                }
-            }
+    private var controlTint: Color {
+        switch store.runPrimaryControlState {
+        case .start, .resume, .restart:
+            return Color.black.opacity(0.82)
+        case .pause:
+            return Color.black.opacity(0.72)
+        case .connecting, .reconnecting:
+            return Color.black.opacity(0.48)
+        case .done:
+            return Color.white.opacity(0.9)
         }
     }
 
-    private var controlIcon: String {
-        switch store.sessionStatus {
-        case .idle:
-            return "play.fill"
-        case .paused:
-            return "playpause.fill"
+    private var controlForeground: Color {
+        switch store.runPrimaryControlState {
+        case .done:
+            return PathlyPalette.textPrimary
         default:
-            return "pause.fill"
-        }
-    }
-
-    private var controlText: String {
-        switch store.sessionStatus {
-        case .idle:
-            return "Start"
-        case .paused:
-            return "Resume"
-        default:
-            return "Pause"
+            return .white
         }
     }
 
     private func countdownOverlay(value: Int) -> some View {
         ZStack {
-            Color.black.opacity(0.28).ignoresSafeArea()
+            Color.black.opacity(0.14).ignoresSafeArea()
             Text("\(value)")
-                .font(.system(size: 96, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 88, weight: .bold, design: .rounded))
+                .foregroundStyle(PathlyPalette.mapTextPrimary)
         }
     }
 
     private var textInterruptSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Interrupt the show in plain English.")
-                    .font(.headline)
-                TextField("Less news, more local context please.", text: $store.textInterruptDraft, axis: .vertical)
-                    .lineLimit(4, reservesSpace: true)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.06)))
-                Button {
-                    store.submitTextInterrupt()
-                    isTextInterruptPresented = false
-                } label: {
-                    Text("Send")
+            ZStack {
+                PathlyBackground()
+
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Interrupt the show in plain English.")
                         .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(RoundedRectangle(cornerRadius: 18).fill(Color.black))
+                        .foregroundStyle(PathlyPalette.textPrimary)
+                    TextField("Less news, more local context please.", text: $store.textInterruptDraft, axis: .vertical)
+                        .lineLimit(4, reservesSpace: true)
+                        .focused($isTextInterruptFocused)
+                        .nativeFieldStyle()
+
+                    PrimaryActionButton(title: "Send", systemImage: "paperplane.fill") {
+                        store.submitTextInterrupt()
+                        isTextInterruptPresented = false
+                    }
+
+                    Spacer()
                 }
-                Spacer()
+                .padding(20)
             }
-            .padding(20)
             .navigationTitle("Text interrupt")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isTextInterruptFocused = false
+                    }
+                }
+            }
         }
     }
 }

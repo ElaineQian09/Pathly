@@ -2,5 +2,7 @@
 
 frontend/build/
 frontend/Config/Secrets.xcconfig
+frontend/Pathly.xcodeproj/project.xcworkspace/xcuserdata/
+frontend/Pathly.xcodeproj/xcuserdata/
 
 backend/build/

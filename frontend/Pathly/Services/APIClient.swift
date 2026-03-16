@@ -32,6 +32,16 @@ actor MockBackendState {
     }
 }
 
+private struct WrappedBackendErrorResponse: Decodable {
+    struct WrappedError: Decodable {
+        var code: String?
+        var message: String
+    }
+
+    var ok: Bool?
+    var error: WrappedError
+}
+
 final class APIClient {
     private let configuration: AppConfiguration
     private let session: URLSession
@@ -81,7 +91,27 @@ final class APIClient {
         }
 
         let requestBody = SessionCreateRequest(profile: profile, routeSelection: routeSelection)
-        return try await request(path: "/v1/sessions", method: "POST", body: requestBody)
+        let response: SessionCreateResponse = try await request(path: "/v1/sessions", method: "POST", body: requestBody)
+
+        guard let websocketURL = configuration.resolveWebSocketURL(from: response.websocketUrl) else {
+            PathlyDiagnostics.network.error(
+                "Session create returned invalid websocketUrl raw=\(response.websocketUrl, privacy: .public)"
+            )
+            throw APIClientError.invalidResponse
+        }
+
+        if websocketURL.absoluteString != response.websocketUrl {
+            PathlyDiagnostics.network.info(
+                "Normalized websocketUrl raw=\(response.websocketUrl, privacy: .public) normalized=\(websocketURL.absoluteString, privacy: .public)"
+            )
+        }
+
+        return SessionCreateResponse(
+            sessionId: response.sessionId,
+            status: response.status,
+            websocketUrl: websocketURL.absoluteString,
+            openingSpeaker: response.openingSpeaker
+        )
     }
 
     private func request<Response: Decodable, Body: Encodable>(
@@ -102,19 +132,45 @@ final class APIClient {
             request.httpBody = try encoder.encode(body)
         }
 
+        PathlyDiagnostics.network.info(
+            "HTTP request method=\(method, privacy: .public) url=\(url.absoluteString, privacy: .public) body=\(PathlyDiagnostics.bodyPreview(request.httpBody), privacy: .public)"
+        )
+
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
+            PathlyDiagnostics.network.error(
+                "HTTP response missing HTTPURLResponse url=\(url.absoluteString, privacy: .public) body=\(PathlyDiagnostics.bodyPreview(data), privacy: .public)"
+            )
             throw APIClientError.invalidResponse
         }
+
+        PathlyDiagnostics.network.info(
+            "HTTP response status=\(String(httpResponse.statusCode), privacy: .public) url=\(url.absoluteString, privacy: .public) body=\(PathlyDiagnostics.bodyPreview(data), privacy: .public)"
+        )
 
         if !(200 ... 299).contains(httpResponse.statusCode) {
             if let payload = try? decoder.decode(ErrorPayload.self, from: data) {
                 throw APIClientError.backend(payload)
             }
+            if let wrappedPayload = try? decoder.decode(WrappedBackendErrorResponse.self, from: data) {
+                throw APIClientError.backend(
+                    ErrorPayload(
+                        code: wrappedPayload.error.code ?? "backend_error",
+                        message: wrappedPayload.error.message
+                    )
+                )
+            }
             throw APIClientError.invalidResponse
         }
 
-        return try decoder.decode(Response.self, from: data)
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            PathlyDiagnostics.network.error(
+                "HTTP decode failed url=\(url.absoluteString, privacy: .public) error=\(String(describing: error), privacy: .public) body=\(PathlyDiagnostics.bodyPreview(data), privacy: .public)"
+            )
+            throw error
+        }
     }
 
     private func mockRouteCandidates(for request: RouteGenerationRequest) -> [RouteCandidate] {

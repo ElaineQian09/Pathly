@@ -5,6 +5,7 @@ enum LiveServerEvent {
     case turnPlan(TurnPlan)
     case playbackSegment(PlaybackPayload)
     case playbackFiller(PlaybackPayload)
+    case playbackAudioChunk(PlaybackAudioChunkPayload)
     case interruptResult(InterruptResult)
     case sessionPreferencesUpdated(SessionPreferencesUpdatedPayload)
     case reconnectRequired(ReconnectRequiredPayload)
@@ -36,6 +37,14 @@ final class LiveSessionClient {
         hasSentOpeningTurn = false
 
         guard !configuration.useMocks else { return }
+        guard let scheme = activeSession.websocketURL.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss" else {
+            PathlyDiagnostics.network.error(
+                "Rejected websocketUrl because scheme is invalid url=\(activeSession.websocketURL.absoluteString, privacy: .public)"
+            )
+            onEvent?(.error(ErrorPayload(code: "invalid_websocket_url", message: "Backend returned an invalid websocketUrl. Expected ws:// or wss://.")))
+            return
+        }
         socketTask = session.webSocketTask(with: activeSession.websocketURL)
         socketTask?.resume()
         receiveLoop()
@@ -208,6 +217,10 @@ final class LiveSessionClient {
             if let decoded = try? decoder.decode(PlaybackPayload.self, from: payloadData) {
                 onEvent?(.playbackFiller(decoded))
             }
+        case "playback.audio.chunk":
+            if let decoded = try? decoder.decode(PlaybackAudioChunkPayload.self, from: payloadData) {
+                onEvent?(.playbackAudioChunk(decoded))
+            }
         case "interrupt.result":
             if let decoded = try? decoder.decode(InterruptResult.self, from: payloadData) {
                 onEvent?(.interruptResult(decoded))
@@ -246,16 +259,16 @@ final class LiveSessionClient {
             )
             onEvent?(.turnPlan(mayaPlan))
             try? await Task.sleep(nanoseconds: 600_000_000)
-            onEvent?(.playbackSegment(PlaybackPayload(
+            await emitMockPlaybackSegment(PlaybackPayload(
                 turnId: "turn_001",
                 speaker: .maya,
                 segmentType: .mainTurn,
-                audioUrl: "https://example.com/audio/turn_001.mp3",
                 transcriptPreview: "Maya here. You have a clean opening stretch and a loop that should settle in fast.",
                 safeInterruptAfterMs: 4000,
-                estimatedPlaybackMs: 11_000
-            )))
-            try? await Task.sleep(nanoseconds: 5_500_000_000)
+                estimatedPlaybackMs: 11_000,
+                audioFormat: .geminiLiveDefault
+            ), frequency: 224)
+            try? await Task.sleep(nanoseconds: 800_000_000)
             onEvent?(.turnPlan(TurnPlan(
                 turnId: "turn_002",
                 speaker: .theo,
@@ -266,25 +279,25 @@ final class LiveSessionClient {
                 safeInterruptAfterMs: 3000
             )))
             try? await Task.sleep(nanoseconds: 700_000_000)
-            onEvent?(.playbackSegment(PlaybackPayload(
+            await emitMockPlaybackSegment(PlaybackPayload(
                 turnId: "turn_002",
                 speaker: .theo,
                 segmentType: .mainTurn,
-                audioUrl: "https://example.com/audio/turn_002.mp3",
                 transcriptPreview: "Theo taking the next beat. Pace is smooth, route risk is low, and this is where Pathly keeps the show flowing.",
                 safeInterruptAfterMs: 3000,
-                estimatedPlaybackMs: 9_000
-            )))
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            onEvent?(.playbackFiller(PlaybackPayload(
+                estimatedPlaybackMs: 9_000,
+                audioFormat: .geminiLiveDefault
+            ), frequency: 176)
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            await emitMockPlaybackFiller(PlaybackPayload(
                 turnId: "filler_001",
                 speaker: .theo,
                 segmentType: .filler,
-                audioUrl: "https://example.com/audio/filler_001.mp3",
                 transcriptPreview: "Hold on, the next stretch has something worth calling out.",
                 safeInterruptAfterMs: 0,
-                estimatedPlaybackMs: 1_800
-            )))
+                estimatedPlaybackMs: 1_800,
+                audioFormat: .geminiLiveDefault
+            ), frequency: 264)
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             onEvent?(.reconnectRequired(ReconnectRequiredPayload(
                 sessionId: sessionId,
@@ -296,14 +309,19 @@ final class LiveSessionClient {
     }
 
     private func emitInterruptResponse(intent: InterruptIntent) {
-        onEvent?(.interruptResult(InterruptResult(
+        let result = InterruptResult(
             turnId: "interrupt_\(UUID().uuidString.prefix(6))",
             speaker: .theo,
             segmentType: .interruptResponse,
             intent: intent,
-            audioUrl: "https://example.com/audio/interrupt.mp3",
-            transcriptPreview: "Got it. I am adjusting the show without dropping the route context."
-        )))
+            transcriptPreview: "Got it. I am adjusting the show without dropping the route context.",
+            estimatedPlaybackMs: 5_200,
+            audioFormat: .geminiLiveDefault
+        )
+
+        Task { [weak self] in
+            await self?.emitMockInterruptResult(result, frequency: 198)
+        }
     }
 
     private func emitQuickActionFollowUp(for action: QuickAction) {
@@ -321,14 +339,19 @@ final class LiveSessionClient {
             text = "Quiet mode is on for the next five minutes unless navigation becomes critical."
         }
 
-        onEvent?(.interruptResult(InterruptResult(
+        let result = InterruptResult(
             turnId: "quick_\(UUID().uuidString.prefix(6))",
             speaker: .maya,
             segmentType: .interruptResponse,
             intent: .preferenceChange,
-            audioUrl: "https://example.com/audio/quick_action.mp3",
-            transcriptPreview: text
-        )))
+            transcriptPreview: text,
+            estimatedPlaybackMs: 4_600,
+            audioFormat: .geminiLiveDefault
+        )
+
+        Task { [weak self] in
+            await self?.emitMockInterruptResult(result, frequency: 248)
+        }
     }
 
     private func updateMockQuietMode(for sessionId: String, minutes: Int) {
@@ -337,5 +360,83 @@ final class LiveSessionClient {
         preferences.quietModeUntil = ISO8601DateFormatter().string(from: Date().addingTimeInterval(TimeInterval(minutes * 60)))
         mockPreferencesBySessionId[sessionId] = preferences
         onEvent?(.sessionPreferencesUpdated(SessionPreferencesUpdatedPayload(sessionId: sessionId, preferences: preferences)))
+    }
+
+    private func emitMockPlaybackSegment(_ payload: PlaybackPayload, frequency: Double) async {
+        onEvent?(.playbackSegment(payload))
+        await emitMockAudioStream(turnId: payload.turnId, durationMs: payload.estimatedPlaybackMs, format: payload.audioFormat ?? .geminiLiveDefault, frequency: frequency)
+    }
+
+    private func emitMockPlaybackFiller(_ payload: PlaybackPayload, frequency: Double) async {
+        onEvent?(.playbackFiller(payload))
+        await emitMockAudioStream(turnId: payload.turnId, durationMs: payload.estimatedPlaybackMs, format: payload.audioFormat ?? .geminiLiveDefault, frequency: frequency)
+    }
+
+    private func emitMockInterruptResult(_ result: InterruptResult, frequency: Double) async {
+        onEvent?(.interruptResult(result))
+        await emitMockAudioStream(turnId: result.turnId, durationMs: result.estimatedPlaybackMs, format: result.audioFormat ?? .geminiLiveDefault, frequency: frequency)
+    }
+
+    private func emitMockAudioStream(turnId: String, durationMs: Int, format: AudioStreamFormat, frequency: Double) async {
+        let sampleRate = max(format.sampleRateHz, 8_000)
+        let channels = max(format.channelCount, 1)
+        let chunkDurationMs = 180
+        let totalFrames = max(sampleRate * max(durationMs, 800) / 1000, sampleRate / 2)
+        let chunkFrames = max(sampleRate * chunkDurationMs / 1000, 1_200)
+        var emittedFrames = 0
+        var chunkIndex = 0
+
+        while emittedFrames < totalFrames {
+            guard !Task.isCancelled else { return }
+            let framesInChunk = min(chunkFrames, totalFrames - emittedFrames)
+            let isFinalChunk = emittedFrames + framesInChunk >= totalFrames
+            let audioBase64 = Self.makeMockPCMChunk(
+                sampleRate: sampleRate,
+                channels: channels,
+                frameOffset: emittedFrames,
+                frameCount: framesInChunk,
+                frequency: frequency
+            )
+
+            onEvent?(.playbackAudioChunk(PlaybackAudioChunkPayload(
+                turnId: turnId,
+                chunkIndex: chunkIndex,
+                audioBase64: audioBase64,
+                isFinalChunk: isFinalChunk
+            )))
+
+            emittedFrames += framesInChunk
+            chunkIndex += 1
+
+            if !isFinalChunk {
+                try? await Task.sleep(nanoseconds: UInt64(chunkDurationMs) * 1_000_000)
+            }
+        }
+    }
+
+    private static func makeMockPCMChunk(
+        sampleRate: Int,
+        channels: Int,
+        frameOffset: Int,
+        frameCount: Int,
+        frequency: Double
+    ) -> String {
+        let amplitude = 0.22
+        var samples = [Int16]()
+        samples.reserveCapacity(frameCount * channels)
+
+        for frame in 0 ..< frameCount {
+            let time = Double(frameOffset + frame) / Double(sampleRate)
+            let envelope = min(1.0, Double(frame) / 600.0) * min(1.0, Double(frameCount - frame) / 600.0)
+            let value = sin(2.0 * Double.pi * frequency * time) * amplitude * max(envelope, 0.24)
+            let sample = Int16(max(-1.0, min(1.0, value)) * Double(Int16.max))
+            for _ in 0 ..< channels {
+                samples.append(sample)
+            }
+        }
+
+        return samples.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer).base64EncodedString()
+        }
     }
 }

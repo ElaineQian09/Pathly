@@ -2,123 +2,148 @@ import SwiftUI
 
 struct OnboardingView: View {
     @ObservedObject var store: AppStore
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case nickname
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Tune the show before your first run.")
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
+        ZStack {
+            PathlyBackground()
 
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Nickname")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        TextField("What should Maya and Theo call you?", text: $store.profile.nickname)
-                            .textInputAutocapitalization(.words)
-                            .padding(14)
-                            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white.opacity(0.12)))
-                            .foregroundStyle(.white)
-                    }
-                }
+            ScrollView(showsIndicators: false) {
+                ContentColumn(maxWidth: 760) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        PageHeader(
+                            eyebrow: "Setup",
+                            title: "Set the default feel of your run.",
+                            subtitle: "These defaults are saved locally and used to prefill each route selection."
+                        )
+                        .padding(.top, 18)
 
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Host style")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        ForEach(HostStyle.allCases) { style in
-                            Button {
-                                store.profile.hostStyle = style
-                            } label: {
-                                StyleChip(title: style.displayName, subtitle: style.helperCopy, badge: style.badgeText, isSelected: store.profile.hostStyle == style)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Default route mode")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Picker("Route mode", selection: $store.profile.routeModeDefault) {
-                            ForEach(RouteMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                sectionEyebrow("Profile")
+                                Text("Nickname")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(PathlyPalette.textPrimary)
+                                TextField("Enter your nickname", text: $store.profile.nickname)
+                                    .textInputAutocapitalization(.words)
+                                    .submitLabel(.done)
+                                    .focused($focusedField, equals: .nickname)
+                                    .nativeFieldStyle()
                             }
                         }
-                        .pickerStyle(.segmented)
-                    }
-                }
 
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Default duration")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Picker("Duration", selection: $store.profile.durationMinutesDefault) {
-                            ForEach(store.availableDurationOptions, id: \.self) { value in
-                                Text(value.asDurationLabel).tag(value)
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 14) {
+                                sectionEyebrow("Hosts")
+                                Text("Host style")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(PathlyPalette.textPrimary)
+                                Text("One shared tone applies to Maya and Theo for the full session.")
+                                    .font(.footnote)
+                                    .foregroundStyle(PathlyPalette.textSecondary)
+                                VStack(spacing: 10) {
+                                    ForEach(HostStyle.allCases) { style in
+                                        Button {
+                                            store.setHostStyle(style)
+                                        } label: {
+                                            StyleChip(title: style.displayName, subtitle: style.helperCopy, badge: style.badgeText, isSelected: store.profile.hostStyle == style)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
                             }
                         }
-                        .pickerStyle(.wheel)
-                        .frame(height: 120)
-                    }
-                }
 
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Optional news categories")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Text("News stays optional and the default density remains medium.")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.white.opacity(0.68))
-                        HStack {
-                            ForEach(NewsCategory.allCases) { category in
-                                Button {
-                                    toggle(category)
-                                } label: {
-                                    Text(category.displayName)
-                                        .font(.subheadline.weight(.semibold))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 10)
-                                        .background(Capsule().fill(store.profile.newsCategories.contains(category) ? Color.teal.opacity(0.85) : Color.white.opacity(0.10)))
-                                        .foregroundStyle(.white)
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 18) {
+                                sectionEyebrow("Route defaults")
+
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Default route mode")
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(PathlyPalette.textPrimary)
+                                    Picker("Route mode", selection: $store.profile.routeModeDefault) {
+                                        ForEach(RouteMode.allCases) { mode in
+                                            Text(mode.displayName).tag(mode)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                }
+
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Default duration")
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(PathlyPalette.textPrimary)
+                                    Picker("Duration", selection: $store.profile.durationMinutesDefault) {
+                                        ForEach(store.availableDurationOptions, id: \.self) { value in
+                                            Text(value.asDurationLabel).tag(value)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(height: 124)
+                                    .clipped()
+                                }
+                            }
+                        }
+
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 14) {
+                                sectionEyebrow("Content")
+                                Text("Optional news categories")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(PathlyPalette.textPrimary)
+                                Text("News stays optional. Default density remains medium.")
+                                    .font(.footnote)
+                                    .foregroundStyle(PathlyPalette.textSecondary)
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], alignment: .leading, spacing: 10) {
+                                    ForEach(NewsCategory.allCases) { category in
+                                        Button {
+                                            store.toggleNewsCategory(category)
+                                        } label: {
+                                            SelectionChip(title: category.displayName, isSelected: store.profile.newsCategories.contains(category))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
-                Button {
-                    Task { await store.completeOnboarding() }
-                } label: {
-                    Text("Continue to routes")
-                        .font(.headline)
-                        .foregroundStyle(Color.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(red: 0.80, green: 0.96, blue: 0.85)))
-                }
-                .disabled(!store.profile.isOnboardingValid)
-                .opacity(store.profile.isOnboardingValid ? 1 : 0.5)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 120)
             }
-            .padding(20)
+            .scrollDismissesKeyboard(.interactively)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .background(
-            LinearGradient(colors: [Color(red: 0.08, green: 0.11, blue: 0.19), Color(red: 0.10, green: 0.30, blue: 0.31)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-        )
+        .safeAreaInset(edge: .bottom) {
+            ContentColumn(maxWidth: 760) {
+                StickyFooter {
+                    PrimaryActionButton(title: "Continue to routes", systemImage: "arrow.right", isEnabled: store.profile.isOnboardingValid) {
+                        focusedField = nil
+                        Task { await store.completeOnboarding() }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+            }
+        }
     }
 
-    private func toggle(_ category: NewsCategory) {
-        if store.profile.newsCategories.contains(category) {
-            store.profile.newsCategories.removeAll { $0 == category }
-        } else {
-            store.profile.newsCategories.append(category)
-        }
+    private func sectionEyebrow(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.bold))
+            .tracking(0.8)
+            .foregroundStyle(PathlyPalette.textTertiary)
     }
 }

@@ -315,11 +315,81 @@ struct RouteGenerationRequest: Codable, Equatable {
     var desiredCount: Int
     var start: Coordinate
     var destinationQuery: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case routeMode
+        case durationMinutes
+        case desiredCount
+        case start
+        case destinationQuery
+    }
+
+    init(
+        routeMode: RouteMode,
+        durationMinutes: Int,
+        desiredCount: Int,
+        start: Coordinate,
+        destinationQuery: String?
+    ) {
+        self.routeMode = routeMode
+        self.durationMinutes = durationMinutes
+        self.desiredCount = desiredCount
+        self.start = start
+        self.destinationQuery = destinationQuery
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        routeMode = try container.decode(RouteMode.self, forKey: .routeMode)
+        durationMinutes = try container.decode(Int.self, forKey: .durationMinutes)
+        desiredCount = try container.decode(Int.self, forKey: .desiredCount)
+        start = try container.decode(Coordinate.self, forKey: .start)
+        destinationQuery = try container.decodeIfPresent(String.self, forKey: .destinationQuery)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(routeMode, forKey: .routeMode)
+        try container.encode(durationMinutes, forKey: .durationMinutes)
+        try container.encode(desiredCount, forKey: .desiredCount)
+        try container.encode(start, forKey: .start)
+        if let destinationQuery {
+            try container.encode(destinationQuery, forKey: .destinationQuery)
+        } else {
+            try container.encodeNil(forKey: .destinationQuery)
+        }
+    }
 }
 
 struct NavigationPayload: Codable, Equatable {
     var routeToken: String?
     var legs: [NavigationLeg]
+
+    private enum CodingKeys: String, CodingKey {
+        case routeToken
+        case legs
+    }
+
+    init(routeToken: String?, legs: [NavigationLeg]) {
+        self.routeToken = routeToken
+        self.legs = legs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        routeToken = try container.decodeIfPresent(String.self, forKey: .routeToken)
+        legs = try container.decode([NavigationLeg].self, forKey: .legs)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let routeToken {
+            try container.encode(routeToken, forKey: .routeToken)
+        } else {
+            try container.encodeNil(forKey: .routeToken)
+        }
+        try container.encode(legs, forKey: .legs)
+    }
 }
 
 struct NavigationLeg: Codable, Equatable, Identifiable {
@@ -509,14 +579,30 @@ struct TurnPlan: Codable, Equatable, Identifiable {
     var id: String { turnId }
 }
 
+enum AudioEncoding: String, Codable, Equatable {
+    case pcmS16LE = "pcm_s16le"
+}
+
+struct AudioStreamFormat: Codable, Equatable {
+    var encoding: AudioEncoding
+    var sampleRateHz: Int
+    var channelCount: Int
+
+    static let geminiLiveDefault = AudioStreamFormat(
+        encoding: .pcmS16LE,
+        sampleRateHz: 24_000,
+        channelCount: 1
+    )
+}
+
 struct PlaybackPayload: Codable, Equatable, Identifiable {
     var turnId: String
     var speaker: SpeakerId
     var segmentType: SegmentType
-    var audioUrl: String
     var transcriptPreview: String
     var safeInterruptAfterMs: Int
     var estimatedPlaybackMs: Int
+    var audioFormat: AudioStreamFormat?
 
     var id: String { turnId }
 }
@@ -526,10 +612,20 @@ struct InterruptResult: Codable, Equatable, Identifiable {
     var speaker: SpeakerId
     var segmentType: SegmentType
     var intent: InterruptIntent
-    var audioUrl: String
     var transcriptPreview: String
+    var estimatedPlaybackMs: Int
+    var audioFormat: AudioStreamFormat?
 
     var id: String { turnId }
+}
+
+struct PlaybackAudioChunkPayload: Codable, Equatable, Identifiable {
+    var turnId: String
+    var chunkIndex: Int
+    var audioBase64: String
+    var isFinalChunk: Bool
+
+    var id: String { "\(turnId):\(chunkIndex)" }
 }
 
 struct ErrorPayload: Codable, Equatable {
@@ -609,7 +705,7 @@ struct QueuedAudioSegment: Identifiable, Equatable {
     var id: String
     var speaker: SpeakerId
     var segmentType: SegmentType
-    var audioURL: URL?
+    var audioFormat: AudioStreamFormat
     var transcriptPreview: String
     var safeInterruptAfterMs: Int
     var estimatedPlaybackMs: Int
@@ -618,7 +714,7 @@ struct QueuedAudioSegment: Identifiable, Equatable {
         id = payload.turnId
         speaker = payload.speaker
         segmentType = payload.segmentType
-        audioURL = URL(string: payload.audioUrl)
+        audioFormat = payload.audioFormat ?? .geminiLiveDefault
         transcriptPreview = payload.transcriptPreview
         safeInterruptAfterMs = payload.safeInterruptAfterMs
         estimatedPlaybackMs = payload.estimatedPlaybackMs
@@ -628,10 +724,10 @@ struct QueuedAudioSegment: Identifiable, Equatable {
         id = result.turnId
         speaker = result.speaker
         segmentType = result.segmentType
-        audioURL = URL(string: result.audioUrl)
+        audioFormat = result.audioFormat ?? .geminiLiveDefault
         transcriptPreview = result.transcriptPreview
         safeInterruptAfterMs = 0
-        estimatedPlaybackMs = 6_000
+        estimatedPlaybackMs = max(result.estimatedPlaybackMs, 1_000)
     }
 }
 

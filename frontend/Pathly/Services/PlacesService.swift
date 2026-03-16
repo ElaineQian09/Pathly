@@ -36,26 +36,27 @@ final class PlacesService {
 
         return await withCheckedContinuation { continuation in
             let filter = GMSAutocompleteFilter()
-            GMSPlacesClient.shared().findAutocompletePredictions(
-                fromQuery: query,
-                filter: filter,
-                sessionToken: sessionToken
-            ) { results, error in
+            let request = GMSAutocompleteRequest(query: query)
+            request.filter = filter
+            request.sessionToken = sessionToken
+
+            GMSPlacesClient.shared().fetchAutocompleteSuggestions(from: request) { results, error in
                 guard error == nil, let results else {
                     continuation.resume(returning: self.mockSuggestions(for: query, near: location))
                     return
                 }
 
-                let suggestions = results.prefix(5).map { result -> PlaceSuggestion in
-                    let fullText = result.attributedFullText.string
+                let suggestions = results.prefix(5).compactMap { result -> PlaceSuggestion? in
+                    guard let suggestion = result.placeSuggestion else { return nil }
+                    let fullText = suggestion.attributedFullText.string
                     let segments = fullText.split(separator: ",", maxSplits: 1).map(String.init)
                     return PlaceSuggestion(
-                        placeId: result.placeID,
+                        placeId: suggestion.placeID,
                         name: segments.first ?? fullText,
                         subtitle: segments.count > 1 ? segments[1].trimmingCharacters(in: .whitespaces) : "Suggested destination",
                         latitude: nil,
                         longitude: nil,
-                        primaryType: nil
+                        primaryType: suggestion.types.first
                     )
                 }
                 continuation.resume(returning: suggestions)
@@ -72,11 +73,16 @@ final class PlacesService {
         #if canImport(GooglePlaces)
         guard configuration.googleMapsAPIKey != nil else { return suggestion }
         return await withCheckedContinuation { continuation in
-            GMSPlacesClient.shared().fetchPlace(
-                fromPlaceID: suggestion.placeId,
-                placeFields: [.coordinate, .name, .types],
+            let request = GMSFetchPlaceRequest(
+                placeID: suggestion.placeId,
+                placeProperties: [
+                    GMSPlaceProperty.coordinate.rawValue,
+                    GMSPlaceProperty.name.rawValue,
+                    GMSPlaceProperty.types.rawValue,
+                ],
                 sessionToken: sessionToken
-            ) { place, error in
+            )
+            GMSPlacesClient.shared().fetchPlace(with: request) { place, error in
                 guard error == nil, let place else {
                     continuation.resume(returning: suggestion)
                     return

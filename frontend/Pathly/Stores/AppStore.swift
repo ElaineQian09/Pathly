@@ -8,6 +8,57 @@ enum AppFlowStep {
     case run
 }
 
+enum RunPrimaryControlState {
+    case start
+    case connecting
+    case pause
+    case resume
+    case reconnecting
+    case done
+    case restart
+
+    var title: String {
+        switch self {
+        case .start:
+            return "Start"
+        case .connecting:
+            return "Connecting"
+        case .pause:
+            return "Pause"
+        case .resume:
+            return "Resume"
+        case .reconnecting:
+            return "Reconnecting"
+        case .done:
+            return "Routes"
+        case .restart:
+            return "Restart"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .start, .resume, .restart:
+            return "play.fill"
+        case .connecting, .reconnecting:
+            return "hourglass"
+        case .pause:
+            return "pause.fill"
+        case .done:
+            return "arrow.uturn.backward"
+        }
+    }
+
+    var isEnabled: Bool {
+        switch self {
+        case .connecting, .reconnecting:
+            return false
+        default:
+            return true
+        }
+    }
+}
+
 @MainActor
 final class AppStore: ObservableObject {
     @Published var hasSeenPitch: Bool
@@ -84,7 +135,6 @@ final class AppStore: ObservableObject {
         selectedDurationMinutes = persistedProfile.durationMinutesDefault
 
         bindServices()
-        self.sensorServices.requestPermissions()
 
         Task {
             await hydrateProfileFromBackend()
@@ -115,6 +165,46 @@ final class AppStore: ObservableObject {
             durationMinutes: selectedDurationMinutes,
             selectedCandidate: candidate
         )
+    }
+
+    var runPrimaryControlState: RunPrimaryControlState {
+        switch sessionStatus {
+        case .idle:
+            return .start
+        case .connecting:
+            return .connecting
+        case .active:
+            return .pause
+        case .paused:
+            return .resume
+        case .reconnecting:
+            return .reconnecting
+        case .ended:
+            return .done
+        case .error:
+            return .restart
+        }
+    }
+
+    var canUseLiveControls: Bool {
+        sessionStatus == .active
+    }
+
+    var runStateSummary: String? {
+        switch sessionStatus {
+        case .connecting:
+            return "Connecting to Pathly live..."
+        case .paused:
+            return "Run paused"
+        case .reconnecting:
+            return reconnectReason.map { "Reconnecting: \($0)" } ?? "Reconnecting session..."
+        case .ended:
+            return "Session ended"
+        case .error:
+            return lastErrorMessage ?? "Session error"
+        default:
+            return nil
+        }
     }
 
     func continueFromPitch() {
@@ -223,13 +313,23 @@ final class AppStore: ObservableObject {
             return
         }
 
+        let routeMode = selectedRouteMode
+        let durationMinutes = selectedDurationMinutes
+        let desiredCount = routeMode == .oneWay ? 1 : 3
+        let usingCurrentLocation = currentLocation != nil
+        let destinationQueryPreview = routeMode == .oneWay ? destinationQuery : "nil"
+
+        PathlyDiagnostics.network.info(
+            "Route generation requested mode=\(routeMode.rawValue, privacy: .public) durationMinutes=\(String(durationMinutes), privacy: .public) desiredCount=\(String(desiredCount), privacy: .public) usingCurrentLocation=\(String(usingCurrentLocation), privacy: .public) startLat=\(String(baseLocation.latitude), privacy: .public) startLng=\(String(baseLocation.longitude), privacy: .public) destinationQuery=\(destinationQueryPreview, privacy: .public)"
+        )
+
         routeGenerationState = currentLocation == nil ? .locating : .generating
         let request = RouteGenerationRequest(
-            routeMode: selectedRouteMode,
-            durationMinutes: selectedDurationMinutes,
-            desiredCount: selectedRouteMode == .oneWay ? 1 : 3,
+            routeMode: routeMode,
+            durationMinutes: durationMinutes,
+            desiredCount: desiredCount,
             start: baseLocation,
-            destinationQuery: selectedRouteMode == .oneWay ? destinationQuery : nil
+            destinationQuery: routeMode == .oneWay ? destinationQuery : nil
         )
 
         do {
@@ -294,6 +394,7 @@ final class AppStore: ObservableObject {
                 transcriptStrip = []
                 reconnectReason = nil
                 sessionStatus = .connecting
+                sensorServices.requestPermissions()
                 sensorServices.startRun(routeSelection: routeSelection)
                 navigationService.configure(routeSelection: routeSelection, voiceGuidanceMuted: localPreferences.muteBuiltInNavigationVoice)
 
@@ -331,16 +432,31 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func handleRunPrimaryControlTap() {
+        switch runPrimaryControlState {
+        case .start, .restart:
+            startRun()
+        case .pause, .resume:
+            pauseOrResumeRun()
+        case .done:
+            returnToRouteSelection()
+        case .connecting, .reconnecting:
+            break
+        }
+    }
+
     func pauseOrResumeRun() {
         guard let activeRunSession else { return }
         if sessionStatus == .paused {
             sessionStatus = .active
+            statusMessage = "Run resumed."
             sensorServices.resumeRun()
             audioPlaybackController.resume()
             Task { await liveSessionClient.sendResume(sessionId: activeRunSession.sessionId) }
             startSnapshotLoop()
         } else if sessionStatus == .active {
             sessionStatus = .paused
+            statusMessage = "Run paused."
             sensorServices.pauseRun()
             audioPlaybackController.pause()
             Task { await liveSessionClient.sendPause(sessionId: activeRunSession.sessionId) }
@@ -349,13 +465,17 @@ final class AppStore: ObservableObject {
     }
 
     func endRun() {
-        guard let activeRunSession else {
+        guard let session = activeRunSession else {
             returnToRouteSelection()
             return
         }
-        Task { await liveSessionClient.sendEnd(sessionId: activeRunSession.sessionId) }
+        Task { await liveSessionClient.sendEnd(sessionId: session.sessionId) }
+        activeRunSession = nil
         sessionStatus = .ended
         reconnectReason = nil
+        statusMessage = "Session ended."
+        interruptCaptureState = .idle
+        currentSpeaker = nil
         stopSnapshotLoop()
         sensorServices.endRun()
         audioPlaybackController.stopAll()
@@ -492,6 +612,11 @@ final class AppStore: ObservableObject {
                 transcriptStrip = Array(transcriptStrip.suffix(3))
             }
         }
+
+        audioPlaybackController.onSegmentFailure = { [weak self] segment, message in
+            guard let self else { return }
+            lastErrorMessage = "Audio playback failed for \(segment.speaker.displayName): \(message)"
+        }
     }
 
     private func handleServerEvent(_ event: LiveServerEvent) {
@@ -504,10 +629,21 @@ final class AppStore: ObservableObject {
             activeTurnPlan = plan
             currentSpeaker = plan.speaker
         case let .playbackSegment(payload):
+            PathlyDiagnostics.audio.info(
+                "Received playback.segment turnId=\(payload.turnId, privacy: .public) speaker=\(payload.speaker.rawValue, privacy: .public) estimatedPlaybackMs=\(String(payload.estimatedPlaybackMs), privacy: .public) audioFormat=\((payload.audioFormat ?? .geminiLiveDefault).encoding.rawValue, privacy: .public)"
+            )
             audioPlaybackController.enqueue(QueuedAudioSegment(payload: payload))
         case let .playbackFiller(payload):
+            PathlyDiagnostics.audio.info(
+                "Received playback.filler turnId=\(payload.turnId, privacy: .public) speaker=\(payload.speaker.rawValue, privacy: .public) estimatedPlaybackMs=\(String(payload.estimatedPlaybackMs), privacy: .public) audioFormat=\((payload.audioFormat ?? .geminiLiveDefault).encoding.rawValue, privacy: .public)"
+            )
             audioPlaybackController.enqueue(QueuedAudioSegment(payload: payload))
+        case let .playbackAudioChunk(payload):
+            audioPlaybackController.appendChunk(payload)
         case let .interruptResult(result):
+            PathlyDiagnostics.audio.info(
+                "Received interrupt.result turnId=\(result.turnId, privacy: .public) speaker=\(result.speaker.rawValue, privacy: .public) estimatedPlaybackMs=\(String(result.estimatedPlaybackMs), privacy: .public) audioFormat=\((result.audioFormat ?? .geminiLiveDefault).encoding.rawValue, privacy: .public)"
+            )
             audioPlaybackController.enqueue(QueuedAudioSegment(result: result))
         case let .sessionPreferencesUpdated(payload):
             guard activeRunSession?.sessionId == payload.sessionId else { return }

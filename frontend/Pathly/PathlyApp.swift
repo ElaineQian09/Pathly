@@ -19,6 +19,7 @@ struct PathlyApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(store: store)
+                .preferredColorScheme(.light)
         }
     }
 }
