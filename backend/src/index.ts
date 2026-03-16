@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { buildApp } from "./http/app.js";
+import { logger } from "./logger.js";
 import { createServices } from "./services/container.js";
 import { attachLiveServer } from "./ws/live-server.js";
 
@@ -46,6 +47,9 @@ if (process.env.NODE_ENV !== "test" && !process.env.VITEST && !runningUnderVites
   const port = Number(process.env.PORT ?? 3000);
   const { server } = createPathlyServer();
   server.listen(port, () => {
-    console.log(`Pathly backend listening on ${port}`);
+    logger.info("server.started", {
+      product: "Pathly",
+      port
+    });
   });
 }

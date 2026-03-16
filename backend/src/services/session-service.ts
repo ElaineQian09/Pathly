@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   CreateSessionRequest,
   RunSession,
@@ -12,7 +13,7 @@ export class SessionService {
   constructor(private readonly store: FileStore) {}
 
   create(request: CreateSessionRequest): RunSession {
-    const sessionId = `sess_${crypto.randomUUID()}`;
+    const sessionId = `sess_${randomUUID()}`;
     const preferences: SessionPreferences = {
       hostStyle: request.profile.hostStyle,
       newsCategories: request.profile.newsCategories,

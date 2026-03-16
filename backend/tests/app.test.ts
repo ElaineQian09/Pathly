@@ -7,6 +7,7 @@ import { MockGeminiAdapter } from "../src/adapters/gemini-adapter.js";
 import { MockPlacesProvider } from "../src/adapters/places-provider.js";
 import { MockRoutesProvider } from "../src/adapters/routes-provider.js";
 import { MockRssProvider } from "../src/adapters/rss-provider.js";
+import { routeGenerationRequestSchema } from "../src/models/types.js";
 import type { UserProfile } from "../src/models/types.js";
 import { CheckpointService } from "../src/services/checkpoint-service.js";
 import { NewsService } from "../src/services/news-service.js";
@@ -62,6 +63,36 @@ describe("Pathly backend", () => {
     expect(savedProfile.talkDensityDefault).toBe("medium");
     expect(candidates).toHaveLength(3);
     expect(candidates[0].navigationPayload.legs[0].steps.length).toBeGreaterThan(0);
+  });
+
+  it("accepts loop requests when destinationQuery is omitted and defaults it to null", () => {
+    const parsed = routeGenerationRequestSchema.safeParse({
+      routeMode: "loop",
+      durationMinutes: 45,
+      desiredCount: 3,
+      start: {
+        latitude: 41.8819,
+        longitude: -87.6278
+      }
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.destinationQuery).toBeNull();
+    }
+  });
+
+  it("rejects invalid route generation payloads with schema errors", () => {
+    const parsed = routeGenerationRequestSchema.safeParse({
+      routeMode: "loop",
+      durationMinutes: 45,
+      desiredCount: 3,
+      start: {
+        latitude: 41.8819
+      }
+    });
+
+    expect(parsed.success).toBe(false);
   });
 
   it("creates a session and handles join, preferences, planning, playback, and interrupts", async () => {

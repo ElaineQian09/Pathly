@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ContentBucket,
   ContextSnapshot,
@@ -83,7 +84,7 @@ export class RouterService {
       session.preferences.talkDensity === "low" ? 10 : session.preferences.talkDensity === "high" ? 26 : 18;
 
     return {
-      turnId: `turn_${crypto.randomUUID()}`,
+      turnId: `turn_${randomUUID()}`,
       speaker: session.currentSpeaker,
       segmentType: "main_turn",
       contentBuckets: uniqueBuckets,
