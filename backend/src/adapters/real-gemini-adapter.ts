@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { requireOk } from "./http.js";
 import { MockGeminiAdapter } from "./gemini-adapter.js";
 import type {
@@ -107,7 +108,7 @@ export class RealGeminiAdapter {
       return this.fallback.composeInterruptResult(session, intent, transcriptPreview);
     }
 
-    const turnId = `turn_${crypto.randomUUID()}`;
+    const turnId = `turn_${randomUUID()}`;
     return {
       turnId,
       speaker: session.currentSpeaker === "maya" ? "theo" : "maya",

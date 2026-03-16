@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { z } from "zod";
 import { logger } from "../logger.js";
@@ -108,7 +109,7 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       });
 
       const payload = {
-        requestId: `routes_req_${crypto.randomUUID()}`,
+        requestId: `routes_req_${randomUUID()}`,
         candidates: normalizedCandidates.data
       };
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ContentBucket,
   InterruptResult,
@@ -42,7 +43,7 @@ export class MockGeminiAdapter {
   }
 
   composeInterruptResult(session: RunSession, intent: string, transcriptPreview: string): InterruptResult {
-    const turnId = `turn_${crypto.randomUUID()}`;
+    const turnId = `turn_${randomUUID()}`;
     return {
       turnId,
       speaker: session.currentSpeaker === "maya" ? "theo" : "maya",

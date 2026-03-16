@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Server as HttpServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { logger } from "../logger.js";
@@ -148,7 +149,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           socket.send(JSON.stringify({
             type: "playback.filler",
             payload: {
-              turnId: `filler_${crypto.randomUUID()}`,
+              turnId: `filler_${randomUUID()}`,
               speaker: session.currentSpeaker,
               segmentType: "filler",
               audioUrl: "https://example.com/audio/filler_repeat.mp3",
