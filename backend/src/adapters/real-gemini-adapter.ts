@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { GeneratedAudioMessage, PATHLY_AUDIO_FORMAT, createGeneratedAudioMessage } from "../audio/pcm.js";
 import { requireOk } from "./http.js";
 import { MockGeminiAdapter } from "./gemini-adapter.js";
 import type {
@@ -65,7 +66,12 @@ export class RealGeminiAdapter {
     return extractText((await response.json()) as GenerateContentResponse);
   }
 
-  async composePlayback(plan: TurnPlan, session: RunSession, places: PlaceCandidate[], news: NewsItem[]): Promise<PlaybackSegment> {
+  async composePlayback(
+    plan: TurnPlan,
+    session: RunSession,
+    places: PlaceCandidate[],
+    news: NewsItem[]
+  ): Promise<GeneratedAudioMessage<PlaybackSegment>> {
     const prompt = [
       "You are writing an English-first spoken preview for Pathly.",
       "Pathly is a content-first running podcast with exactly one active speaking lane.",
@@ -83,18 +89,21 @@ export class RealGeminiAdapter {
       return this.fallback.composePlayback(plan, session, places, news);
     }
 
-    return {
+    return createGeneratedAudioMessage({
       turnId: plan.turnId,
       speaker: plan.speaker,
-      segmentType: plan.segmentType,
-      audioUrl: `${process.env.PATHLY_AUDIO_BASE_URL ?? "https://example.com/audio"}/${plan.turnId}.mp3`,
+      segmentType: "main_turn",
       transcriptPreview: text,
-      safeInterruptAfterMs: plan.safeInterruptAfterMs,
-      estimatedPlaybackMs: Math.max(1800, plan.targetDurationSeconds * 900)
-    };
+      estimatedPlaybackMs: Math.max(1800, plan.targetDurationSeconds * 900),
+      audioFormat: PATHLY_AUDIO_FORMAT
+    });
   }
 
-  async composeInterruptResult(session: RunSession, intent: string, transcriptPreview: string): Promise<InterruptResult> {
+  async composeInterruptResult(
+    session: RunSession,
+    intent: string,
+    transcriptPreview: string
+  ): Promise<GeneratedAudioMessage<InterruptResult>> {
     const prompt = [
       "You are writing an English-first interrupt response for Pathly.",
       `Current style: ${session.preferences.hostStyle}.`,
@@ -109,13 +118,13 @@ export class RealGeminiAdapter {
     }
 
     const turnId = `turn_${randomUUID()}`;
-    return {
+    return createGeneratedAudioMessage({
       turnId,
       speaker: session.currentSpeaker === "maya" ? "theo" : "maya",
       segmentType: "interrupt_response",
-      intent,
-      audioUrl: `${process.env.PATHLY_AUDIO_BASE_URL ?? "https://example.com/audio"}/${turnId}.mp3`,
-      transcriptPreview: text
-    };
+      transcriptPreview: text,
+      estimatedPlaybackMs: Math.max(1400, text.length * 75),
+      audioFormat: PATHLY_AUDIO_FORMAT
+    });
   }
 }

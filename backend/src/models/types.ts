@@ -186,23 +186,38 @@ export type TurnPlan = {
   safeInterruptAfterMs: number;
 };
 
-export type PlaybackSegment = {
+export type AudioFormat = {
+  encoding: "pcm_s16le";
+  sampleRateHz: 24000;
+  channelCount: 1;
+};
+
+export type AudioSegmentMetadata = {
   turnId: string;
   speaker: Speaker;
   segmentType: SegmentType;
-  audioUrl: string;
   transcriptPreview: string;
-  safeInterruptAfterMs: number;
   estimatedPlaybackMs: number;
+  audioFormat: AudioFormat;
 };
 
-export type InterruptResult = {
-  turnId: string;
-  speaker: Speaker;
+export type PlaybackSegment = AudioSegmentMetadata & {
+  segmentType: "main_turn";
+};
+
+export type PlaybackFiller = AudioSegmentMetadata & {
+  segmentType: "filler";
+};
+
+export type InterruptResult = AudioSegmentMetadata & {
   segmentType: "interrupt_response";
-  intent: string;
-  audioUrl: string;
-  transcriptPreview: string;
+};
+
+export type PlaybackAudioChunk = {
+  turnId: string;
+  chunkIndex: number;
+  audioBase64: string;
+  isFinalChunk: boolean;
 };
 
 export type SessionCheckpoint = {

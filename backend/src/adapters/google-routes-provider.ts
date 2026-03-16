@@ -1,3 +1,4 @@
+import { logger } from "../logger.js";
 import { requireOk } from "./http.js";
 import { MockRoutesProvider } from "./routes-provider.js";
 import type { RouteCandidate, RouteMode } from "../models/types.js";
@@ -11,6 +12,7 @@ type ComputeRoutesResponse = {
   routes?: Array<{
     distanceMeters?: number;
     duration?: string;
+    routeToken?: string;
     polyline?: { encodedPolyline?: string };
     legs?: Array<{
       distanceMeters?: number;
@@ -82,13 +84,23 @@ export class GoogleRoutesProvider {
     private readonly fallback: MockRoutesProvider
   ) {}
 
-  private async computeRoute(origin: LatLng, destination: LatLng, intermediates: LatLng[] = []): Promise<ComputeRoutesResponse> {
+  private async computeRoute(
+    origin: LatLng,
+    destination: LatLng,
+    intermediates: LatLng[] = [],
+    options?: {
+      travelMode?: "WALK" | "DRIVE" | "TWO_WHEELER";
+      routingPreference?: "TRAFFIC_UNAWARE" | "TRAFFIC_AWARE" | "TRAFFIC_AWARE_OPTIMAL";
+      fieldMask?: string;
+    }
+  ): Promise<ComputeRoutesResponse> {
     const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-goog-api-key": this.apiKey ?? "",
         "x-goog-fieldmask":
+          options?.fieldMask ??
           "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.maneuver"
       },
       body: JSON.stringify({
@@ -107,8 +119,8 @@ export class GoogleRoutesProvider {
             latLng: intermediate
           }
         })),
-        travelMode: "WALK",
-        routingPreference: "TRAFFIC_UNAWARE",
+        travelMode: options?.travelMode ?? "WALK",
+        routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
         computeAlternativeRoutes: false,
         polylineEncoding: "ENCODED_POLYLINE",
         polylineQuality: "OVERVIEW",
@@ -119,6 +131,28 @@ export class GoogleRoutesProvider {
 
     await requireOk(response, "Google Routes API");
     return (await response.json()) as ComputeRoutesResponse;
+  }
+
+  private async computeRouteToken(origin: LatLng, destination: LatLng, intermediates: LatLng[]): Promise<string | null> {
+    try {
+      const tokenResponse = await this.computeRoute(origin, destination, intermediates, {
+        travelMode: "DRIVE",
+        routingPreference: "TRAFFIC_AWARE",
+        fieldMask: "routes.routeToken"
+      });
+      const routeToken = tokenResponse.routes?.[0]?.routeToken ?? null;
+      if (!routeToken) {
+        logger.warn("routes.route_token.unavailable", {
+          reason: "missing_in_response"
+        });
+      }
+      return routeToken;
+    } catch (error) {
+      logger.warn("routes.route_token.error", {
+        message: error instanceof Error ? error.message : "Unknown route token error"
+      });
+      return null;
+    }
   }
 
   async generateCandidates(
@@ -143,6 +177,12 @@ export class GoogleRoutesProvider {
         start,
         routeMode === "loop" ? start : syntheticDestination,
         routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : []
+      );
+      const intermediates = routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
+      const routeToken = await this.computeRouteToken(
+        start,
+        routeMode === "loop" ? start : syntheticDestination,
+        intermediates
       );
 
       const route = response.routes?.[0];
@@ -175,7 +215,7 @@ export class GoogleRoutesProvider {
         endLongitude: endPoint.longitude,
         apiSource: "google_routes_api",
         navigationPayload: {
-          routeToken: null,
+          routeToken,
           legs: legSteps(route)
         }
       } satisfies RouteCandidate;
