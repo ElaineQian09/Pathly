@@ -204,42 +204,66 @@ final class LiveSessionClient {
         case "session.ready":
             if let decoded = try? decoder.decode(SessionReadyPayload.self, from: payloadData) {
                 onEvent?(.sessionReady(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "turn.plan":
             if let decoded = try? decoder.decode(TurnPlan.self, from: payloadData) {
                 onEvent?(.turnPlan(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "playback.segment":
             if let decoded = try? decoder.decode(PlaybackPayload.self, from: payloadData) {
                 onEvent?(.playbackSegment(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "playback.filler":
             if let decoded = try? decoder.decode(PlaybackPayload.self, from: payloadData) {
                 onEvent?(.playbackFiller(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "playback.audio.chunk":
             if let decoded = try? decoder.decode(PlaybackAudioChunkPayload.self, from: payloadData) {
                 onEvent?(.playbackAudioChunk(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "interrupt.result":
             if let decoded = try? decoder.decode(InterruptResult.self, from: payloadData) {
                 onEvent?(.interruptResult(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "session.preferences.updated":
             if let decoded = try? decoder.decode(SessionPreferencesUpdatedPayload.self, from: payloadData) {
                 onEvent?(.sessionPreferencesUpdated(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "session.reconnect_required":
             if let decoded = try? decoder.decode(ReconnectRequiredPayload.self, from: payloadData) {
                 onEvent?(.reconnectRequired(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         case "error":
             if let decoded = try? decoder.decode(ErrorPayload.self, from: payloadData) {
                 onEvent?(.error(decoded))
+            } else {
+                logDecodeFailure(type: type, payloadData: payloadData)
             }
         default:
             break
         }
+    }
+
+    private func logDecodeFailure(type: String, payloadData: Data) {
+        PathlyDiagnostics.network.error(
+            "Failed to decode websocket payload type=\(type, privacy: .public) payload=\(PathlyDiagnostics.bodyPreview(payloadData), privacy: .public)"
+        )
     }
 
     private func scheduleMockPlaybackIfNeeded(sessionId: String) {

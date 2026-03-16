@@ -605,6 +605,45 @@ struct PlaybackPayload: Codable, Equatable, Identifiable {
     var audioFormat: AudioStreamFormat?
 
     var id: String { turnId }
+
+    private enum CodingKeys: String, CodingKey {
+        case turnId
+        case speaker
+        case segmentType
+        case transcriptPreview
+        case safeInterruptAfterMs
+        case estimatedPlaybackMs
+        case audioFormat
+    }
+
+    init(
+        turnId: String,
+        speaker: SpeakerId,
+        segmentType: SegmentType,
+        transcriptPreview: String,
+        safeInterruptAfterMs: Int,
+        estimatedPlaybackMs: Int,
+        audioFormat: AudioStreamFormat?
+    ) {
+        self.turnId = turnId
+        self.speaker = speaker
+        self.segmentType = segmentType
+        self.transcriptPreview = transcriptPreview
+        self.safeInterruptAfterMs = safeInterruptAfterMs
+        self.estimatedPlaybackMs = estimatedPlaybackMs
+        self.audioFormat = audioFormat
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        turnId = try container.decode(String.self, forKey: .turnId)
+        speaker = try container.decode(SpeakerId.self, forKey: .speaker)
+        segmentType = try container.decode(SegmentType.self, forKey: .segmentType)
+        transcriptPreview = try container.decode(String.self, forKey: .transcriptPreview)
+        safeInterruptAfterMs = try container.decodeIfPresent(Int.self, forKey: .safeInterruptAfterMs) ?? 0
+        estimatedPlaybackMs = try container.decodeIfPresent(Int.self, forKey: .estimatedPlaybackMs) ?? 6_000
+        audioFormat = try container.decodeIfPresent(AudioStreamFormat.self, forKey: .audioFormat)
+    }
 }
 
 struct InterruptResult: Codable, Equatable, Identifiable {
@@ -617,6 +656,45 @@ struct InterruptResult: Codable, Equatable, Identifiable {
     var audioFormat: AudioStreamFormat?
 
     var id: String { turnId }
+
+    private enum CodingKeys: String, CodingKey {
+        case turnId
+        case speaker
+        case segmentType
+        case intent
+        case transcriptPreview
+        case estimatedPlaybackMs
+        case audioFormat
+    }
+
+    init(
+        turnId: String,
+        speaker: SpeakerId,
+        segmentType: SegmentType,
+        intent: InterruptIntent,
+        transcriptPreview: String,
+        estimatedPlaybackMs: Int,
+        audioFormat: AudioStreamFormat?
+    ) {
+        self.turnId = turnId
+        self.speaker = speaker
+        self.segmentType = segmentType
+        self.intent = intent
+        self.transcriptPreview = transcriptPreview
+        self.estimatedPlaybackMs = estimatedPlaybackMs
+        self.audioFormat = audioFormat
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        turnId = try container.decode(String.self, forKey: .turnId)
+        speaker = try container.decode(SpeakerId.self, forKey: .speaker)
+        segmentType = try container.decode(SegmentType.self, forKey: .segmentType)
+        intent = try container.decode(InterruptIntent.self, forKey: .intent)
+        transcriptPreview = try container.decode(String.self, forKey: .transcriptPreview)
+        estimatedPlaybackMs = try container.decodeIfPresent(Int.self, forKey: .estimatedPlaybackMs) ?? 5_000
+        audioFormat = try container.decodeIfPresent(AudioStreamFormat.self, forKey: .audioFormat)
+    }
 }
 
 struct PlaybackAudioChunkPayload: Codable, Equatable, Identifiable {

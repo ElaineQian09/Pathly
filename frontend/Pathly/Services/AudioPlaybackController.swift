@@ -25,6 +25,7 @@ final class AudioPlaybackController: ObservableObject {
     private let playerNode = AVAudioPlayerNode()
     private var orderedSegmentIds: [String] = []
     private var streamingSegmentsById: [String: StreamingSegmentState] = [:]
+    private var bufferedChunksByTurnId: [String: [PlaybackAudioChunkPayload]] = [:]
     private var currentSegmentId: String?
 
     init() {
@@ -46,7 +47,19 @@ final class AudioPlaybackController: ObservableObject {
             return
         }
         guard streamingSegmentsById[segment.id] == nil else { return }
-        streamingSegmentsById[segment.id] = StreamingSegmentState(segment: segment)
+        var state = StreamingSegmentState(segment: segment)
+        if let bufferedChunks = bufferedChunksByTurnId.removeValue(forKey: segment.id) {
+            for chunk in bufferedChunks.sorted(by: { $0.chunkIndex < $1.chunkIndex }) {
+                state.receivedChunks[chunk.chunkIndex] = chunk
+                if chunk.isFinalChunk {
+                    state.finalChunkIndex = chunk.chunkIndex
+                }
+            }
+            PathlyDiagnostics.audio.info(
+                "Attached buffered streamed chunks to segment turnId=\(segment.id, privacy: .public) bufferedChunkCount=\(String(bufferedChunks.count), privacy: .public)"
+            )
+        }
+        streamingSegmentsById[segment.id] = state
         orderedSegmentIds.append(segment.id)
         PathlyDiagnostics.audio.info(
             "Queued streamed segment turnId=\(segment.id, privacy: .public) speaker=\(segment.speaker.rawValue, privacy: .public) segmentType=\(segment.segmentType.rawValue, privacy: .public) format=\(segment.audioFormat.encoding.rawValue, privacy: .public)@\(String(segment.audioFormat.sampleRateHz), privacy: .public)Hz"
@@ -56,8 +69,10 @@ final class AudioPlaybackController: ObservableObject {
 
     func appendChunk(_ payload: PlaybackAudioChunkPayload) {
         guard var state = streamingSegmentsById[payload.turnId] else {
-            PathlyDiagnostics.audio.error(
-                "Dropped streamed audio chunk because segment metadata is missing turnId=\(payload.turnId, privacy: .public) chunkIndex=\(String(payload.chunkIndex), privacy: .public)"
+            bufferedChunksByTurnId[payload.turnId, default: []].append(payload)
+            bufferedChunksByTurnId[payload.turnId]?.sort { $0.chunkIndex < $1.chunkIndex }
+            PathlyDiagnostics.audio.info(
+                "Buffered streamed audio chunk while waiting for segment metadata turnId=\(payload.turnId, privacy: .public) chunkIndex=\(String(payload.chunkIndex), privacy: .public) bufferedChunkCount=\(String(self.bufferedChunksByTurnId[payload.turnId]?.count ?? 0), privacy: .public)"
             )
             return
         }
@@ -104,6 +119,7 @@ final class AudioPlaybackController: ObservableObject {
         playerNode.stop()
         orderedSegmentIds.removeAll()
         streamingSegmentsById.removeAll()
+        bufferedChunksByTurnId.removeAll()
         currentSegmentId = nil
         nowPlaying = nil
         isPaused = false
