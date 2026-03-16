@@ -50,7 +50,7 @@ type SocketLike = {
 
 const parseJson = (raw: string) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> };
 
-const sendAudioChunks = (socket: SocketLike, turnId: string, audioChunks: string[]) => {
+const sendAudioChunks = (socket: SocketLike, sessionId: string, turnId: string, audioChunks: string[]) => {
   audioChunks.forEach((audioBase64, chunkIndex) => {
     const chunk: PlaybackAudioChunk = {
       turnId,
@@ -58,6 +58,13 @@ const sendAudioChunks = (socket: SocketLike, turnId: string, audioChunks: string
       audioBase64,
       isFinalChunk: chunkIndex === audioChunks.length - 1
     };
+    logger.info("ws.playback.audio.chunk.sent", {
+      sessionId,
+      turnId,
+      chunkIndex,
+      isFinalChunk: chunk.isFinalChunk,
+      chunkByteLength: Buffer.byteLength(audioBase64, "base64")
+    });
     socket.send(JSON.stringify({
       type: "playback.audio.chunk",
       payload: chunk
@@ -67,15 +74,25 @@ const sendAudioChunks = (socket: SocketLike, turnId: string, audioChunks: string
 
 const sendSegmentWithAudio = (
   socket: SocketLike,
+  sessionId: string,
   eventType: "playback.segment" | "playback.filler" | "interrupt.result",
   message: GeneratedAudioMessage<PlaybackSegment | PlaybackFiller | InterruptResult>
 ) => {
   const { audioChunks, ...metadata } = message;
+  logger.info("ws.playback.segment.sent", {
+    sessionId,
+    eventType,
+    turnId: metadata.turnId,
+    speaker: metadata.speaker,
+    segmentType: metadata.segmentType,
+    estimatedPlaybackMs: metadata.estimatedPlaybackMs,
+    chunkCount: audioChunks.length
+  });
   socket.send(JSON.stringify({
     type: eventType,
     payload: metadata
   }));
-  sendAudioChunks(socket, metadata.turnId, audioChunks);
+  sendAudioChunks(socket, sessionId, metadata.turnId, audioChunks);
 };
 
 export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, raw: string) => {
@@ -146,7 +163,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
             buckets: plan.contentBuckets
           });
           socket.send(JSON.stringify({ type: "turn.plan", payload: plan }));
-          sendSegmentWithAudio(socket, "playback.segment", segment);
+          sendSegmentWithAudio(socket, sessionId, "playback.segment", segment);
         }
 
         if (!session.reconnectIssued && parsed.data.motion.elapsedSeconds >= 1800) {
@@ -179,6 +196,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         if (payload.action === "repeat" && session.lastTurnAt) {
           sendSegmentWithAudio(
             socket,
+            sessionId,
             "playback.filler",
             createGeneratedAudioMessage({
               turnId: `filler_${randomUUID()}`,
@@ -210,6 +228,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         });
         sendSegmentWithAudio(
           socket,
+          sessionId,
           "interrupt.result",
           await deps.geminiAdapter.composeInterruptResult(
             session,
@@ -246,6 +265,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         });
         sendSegmentWithAudio(
           socket,
+          sessionId,
           "interrupt.result",
           await deps.geminiAdapter.composeInterruptResult(
             session,
