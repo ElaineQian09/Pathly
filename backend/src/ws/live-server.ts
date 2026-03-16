@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Server as HttpServer } from "node:http";
 import { WebSocketServer } from "ws";
+import { GeneratedAudioMessage, PATHLY_AUDIO_FORMAT, createGeneratedAudioMessage } from "../audio/pcm.js";
 import { logger } from "../logger.js";
 import {
   InterruptResult,
   NewsItem,
   PlaceCandidate,
+  PlaybackAudioChunk,
+  PlaybackFiller,
   PlaybackSegment,
   RunSession,
   TurnPlan,
@@ -24,12 +27,12 @@ type GeminiAdapterLike = {
     session: RunSession,
     places: PlaceCandidate[],
     news: NewsItem[]
-  ): Promise<PlaybackSegment> | PlaybackSegment;
+  ): Promise<GeneratedAudioMessage<PlaybackSegment>> | GeneratedAudioMessage<PlaybackSegment>;
   composeInterruptResult(
     session: RunSession,
     intent: string,
     transcriptPreview: string
-  ): Promise<InterruptResult> | InterruptResult;
+  ): Promise<GeneratedAudioMessage<InterruptResult>> | GeneratedAudioMessage<InterruptResult>;
 };
 
 type WsDependencies = {
@@ -46,6 +49,34 @@ type SocketLike = {
 };
 
 const parseJson = (raw: string) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> };
+
+const sendAudioChunks = (socket: SocketLike, turnId: string, audioChunks: string[]) => {
+  audioChunks.forEach((audioBase64, chunkIndex) => {
+    const chunk: PlaybackAudioChunk = {
+      turnId,
+      chunkIndex,
+      audioBase64,
+      isFinalChunk: chunkIndex === audioChunks.length - 1
+    };
+    socket.send(JSON.stringify({
+      type: "playback.audio.chunk",
+      payload: chunk
+    }));
+  });
+};
+
+const sendSegmentWithAudio = (
+  socket: SocketLike,
+  eventType: "playback.segment" | "playback.filler" | "interrupt.result",
+  message: GeneratedAudioMessage<PlaybackSegment | PlaybackFiller | InterruptResult>
+) => {
+  const { audioChunks, ...metadata } = message;
+  socket.send(JSON.stringify({
+    type: eventType,
+    payload: metadata
+  }));
+  sendAudioChunks(socket, metadata.turnId, audioChunks);
+};
 
 export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, raw: string) => {
   try {
@@ -115,7 +146,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
             buckets: plan.contentBuckets
           });
           socket.send(JSON.stringify({ type: "turn.plan", payload: plan }));
-          socket.send(JSON.stringify({ type: "playback.segment", payload: segment }));
+          sendSegmentWithAudio(socket, "playback.segment", segment);
         }
 
         if (!session.reconnectIssued && parsed.data.motion.elapsedSeconds >= 1800) {
@@ -146,18 +177,18 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           action: String(payload.action ?? "")
         });
         if (payload.action === "repeat" && session.lastTurnAt) {
-          socket.send(JSON.stringify({
-            type: "playback.filler",
-            payload: {
+          sendSegmentWithAudio(
+            socket,
+            "playback.filler",
+            createGeneratedAudioMessage({
               turnId: `filler_${randomUUID()}`,
               speaker: session.currentSpeaker,
               segmentType: "filler",
-              audioUrl: "https://example.com/audio/filler_repeat.mp3",
               transcriptPreview: "Repeating the last point in a tighter version.",
-              safeInterruptAfterMs: 0,
-              estimatedPlaybackMs: 1800
-            }
-          }));
+              estimatedPlaybackMs: 1800,
+              audioFormat: PATHLY_AUDIO_FORMAT
+            })
+          );
         }
         break;
       }
@@ -177,16 +208,17 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           intent
         });
-        socket.send(JSON.stringify({
-          type: "interrupt.result",
-          payload: await deps.geminiAdapter.composeInterruptResult(
+        sendSegmentWithAudio(
+          socket,
+          "interrupt.result",
+          await deps.geminiAdapter.composeInterruptResult(
             session,
             intent,
             intent === "preference_change"
               ? "Got it. I updated the run settings and the next turns will follow that immediately."
               : "I heard you. I will answer directly first, then bring the show back in cleanly."
           )
-        }));
+        );
         break;
       }
       case "interrupt.voice.start": {
@@ -212,14 +244,15 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           chunkCount: session.voiceInterruptChunks.length
         });
-        socket.send(JSON.stringify({
-          type: "interrupt.result",
-          payload: await deps.geminiAdapter.composeInterruptResult(
+        sendSegmentWithAudio(
+          socket,
+          "interrupt.result",
+          await deps.geminiAdapter.composeInterruptResult(
             session,
             "direct_answer",
             "I heard the interruption and I am switching to a short direct response before resuming the show."
           )
-        }));
+        );
         session.voiceInterruptChunks = [];
         deps.sessionService.save(session);
         break;

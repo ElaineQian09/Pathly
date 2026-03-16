@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { GeneratedAudioMessage, PATHLY_AUDIO_FORMAT, createGeneratedAudioMessage } from "../audio/pcm.js";
 import type {
   ContentBucket,
   InterruptResult,
@@ -27,30 +28,38 @@ const bucketLine = (bucket: ContentBucket, places: PlaceCandidate[], news: NewsI
 };
 
 export class MockGeminiAdapter {
-  composePlayback(plan: TurnPlan, session: RunSession, places: PlaceCandidate[], news: NewsItem[]): PlaybackSegment {
+  composePlayback(
+    plan: TurnPlan,
+    session: RunSession,
+    places: PlaceCandidate[],
+    news: NewsItem[]
+  ): GeneratedAudioMessage<PlaybackSegment> {
     const opener = plan.speaker === "maya" ? "Maya:" : "Theo:";
     const lines = plan.contentBuckets.map((bucket) => bucketLine(bucket, places, news));
     const transcriptPreview = `${opener} ${lines.join(" ")}`.trim();
-    return {
+    return createGeneratedAudioMessage({
       turnId: plan.turnId,
       speaker: plan.speaker,
-      segmentType: plan.segmentType,
-      audioUrl: `https://example.com/audio/${plan.turnId}.mp3`,
+      segmentType: "main_turn",
       transcriptPreview,
-      safeInterruptAfterMs: plan.safeInterruptAfterMs,
-      estimatedPlaybackMs: Math.max(1800, plan.targetDurationSeconds * 900)
-    };
+      estimatedPlaybackMs: Math.max(1800, plan.targetDurationSeconds * 900),
+      audioFormat: PATHLY_AUDIO_FORMAT
+    });
   }
 
-  composeInterruptResult(session: RunSession, intent: string, transcriptPreview: string): InterruptResult {
+  composeInterruptResult(
+    session: RunSession,
+    intent: string,
+    transcriptPreview: string
+  ): GeneratedAudioMessage<InterruptResult> {
     const turnId = `turn_${randomUUID()}`;
-    return {
+    return createGeneratedAudioMessage({
       turnId,
       speaker: session.currentSpeaker === "maya" ? "theo" : "maya",
       segmentType: "interrupt_response",
-      intent,
-      audioUrl: `https://example.com/audio/${turnId}.mp3`,
-      transcriptPreview
-    };
+      transcriptPreview,
+      estimatedPlaybackMs: Math.max(1400, transcriptPreview.length * 75),
+      audioFormat: PATHLY_AUDIO_FORMAT
+    });
   }
 }

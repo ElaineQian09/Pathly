@@ -213,7 +213,33 @@ describe("Pathly backend", () => {
     expect(messages.some((message) => message.type === "session.preferences.updated")).toBe(true);
     expect(messages.some((message) => message.type === "turn.plan")).toBe(true);
     expect(messages.some((message) => message.type === "playback.segment")).toBe(true);
+    expect(messages.some((message) => message.type === "playback.audio.chunk")).toBe(true);
     expect(messages.some((message) => message.type === "interrupt.result")).toBe(true);
+
+    const playbackSegmentIndex = messages.findIndex((message) => message.type === "playback.segment");
+    const firstChunkIndex = messages.findIndex((message) => message.type === "playback.audio.chunk");
+    const playbackSegment = messages[playbackSegmentIndex];
+    const interruptResult = messages.find((message) => message.type === "interrupt.result");
+    const chunkMessages = messages.filter((message) => message.type === "playback.audio.chunk");
+
+    expect(playbackSegmentIndex).toBeGreaterThanOrEqual(0);
+    expect(firstChunkIndex).toBeGreaterThan(playbackSegmentIndex);
+    expect(playbackSegment?.payload).not.toHaveProperty("audioUrl");
+    expect(playbackSegment?.payload).toMatchObject({
+      audioFormat: {
+        encoding: "pcm_s16le",
+        sampleRateHz: 24000,
+        channelCount: 1
+      }
+    });
+    expect(interruptResult?.payload).not.toHaveProperty("audioUrl");
+    expect(chunkMessages[0]?.payload).toMatchObject({
+      chunkIndex: 0,
+      isFinalChunk: false
+    });
+    expect(chunkMessages.at(-1)?.payload).toMatchObject({
+      isFinalChunk: true
+    });
 
     const reloadedStore = new FileStore(dataDir);
     const restoredSessionService = new SessionService(reloadedStore);
