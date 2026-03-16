@@ -1,0 +1,429 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1001 /* PathlyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2001 /* PathlyApp.swift */; };
+		1002 /* ContractModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2002 /* ContractModels.swift */; };
+		1003 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2003 /* AppConfiguration.swift */; };
+		1004 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2004 /* Persistence.swift */; };
+		1005 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2005 /* APIClient.swift */; };
+		1006 /* PlacesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2006 /* PlacesService.swift */; };
+		1007 /* NavigationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2007 /* NavigationService.swift */; };
+		1008 /* SensorServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2008 /* SensorServices.swift */; };
+		1009 /* AudioPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2009 /* AudioPlaybackController.swift */; };
+		100A /* VoiceInterruptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200A /* VoiceInterruptService.swift */; };
+		100B /* LiveSessionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200B /* LiveSessionClient.swift */; };
+		100C /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200C /* AppStore.swift */; };
+		100D /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200D /* SharedComponents.swift */; };
+		100E /* PathlyMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200E /* PathlyMapView.swift */; };
+		100F /* PitchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200F /* PitchView.swift */; };
+		1010 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2010 /* OnboardingView.swift */; };
+		1011 /* RouteSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2011 /* RouteSelectionView.swift */; };
+		1012 /* RunView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2012 /* RunView.swift */; };
+		1013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2013 /* SettingsView.swift */; };
+		1014 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2014 /* RootView.swift */; };
+		1015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2015 /* Assets.xcassets */; };
+		1016 /* GoogleMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 4011 /* GoogleMaps */; };
+		1017 /* GooglePlaces in Frameworks */ = {isa = PBXBuildFile; productRef = 4012 /* GooglePlaces */; };
+		1018 /* GoogleNavigation in Frameworks */ = {isa = PBXBuildFile; productRef = 4013 /* GoogleNavigation */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1FFF /* Pathly.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pathly.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2001 /* PathlyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathlyApp.swift; sourceTree = "<group>"; };
+		2002 /* ContractModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContractModels.swift; sourceTree = "<group>"; };
+		2003 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
+		2004 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		2005 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		2006 /* PlacesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesService.swift; sourceTree = "<group>"; };
+		2007 /* NavigationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationService.swift; sourceTree = "<group>"; };
+		2008 /* SensorServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorServices.swift; sourceTree = "<group>"; };
+		2009 /* AudioPlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackController.swift; sourceTree = "<group>"; };
+		200A /* VoiceInterruptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInterruptService.swift; sourceTree = "<group>"; };
+		200B /* LiveSessionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionClient.swift; sourceTree = "<group>"; };
+		200C /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		200D /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		200E /* PathlyMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathlyMapView.swift; sourceTree = "<group>"; };
+		200F /* PitchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PitchView.swift; sourceTree = "<group>"; };
+		2010 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		2011 /* RouteSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSelectionView.swift; sourceTree = "<group>"; };
+		2012 /* RunView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunView.swift; sourceTree = "<group>"; };
+		2013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2014 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		2015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2016 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		2017 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		2018 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		2019 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.example.xcconfig; sourceTree = "<group>"; };
+		201A /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1016 /* GoogleMaps in Frameworks */,
+				1017 /* GooglePlaces in Frameworks */,
+				1018 /* GoogleNavigation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2100 = {
+			isa = PBXGroup;
+			children = (
+				2101 /* Pathly */,
+				2102 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2101 /* Pathly */ = {
+			isa = PBXGroup;
+			children = (
+				2107 /* ../Config */,
+				2103 /* Models */,
+				2104 /* Services */,
+				2105 /* Stores */,
+				2106 /* Views */,
+				2108 /* Resources */,
+				2001 /* PathlyApp.swift */,
+			);
+			path = Pathly;
+			sourceTree = "<group>";
+		};
+		2102 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1FFF /* Pathly.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		2103 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				2002 /* ContractModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		2104 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				2003 /* AppConfiguration.swift */,
+				2004 /* Persistence.swift */,
+				2005 /* APIClient.swift */,
+				2006 /* PlacesService.swift */,
+				2007 /* NavigationService.swift */,
+				2008 /* SensorServices.swift */,
+				2009 /* AudioPlaybackController.swift */,
+				200A /* VoiceInterruptService.swift */,
+				200B /* LiveSessionClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		2105 /* Stores */ = {
+			isa = PBXGroup;
+			children = (
+				200C /* AppStore.swift */,
+			);
+			path = Stores;
+			sourceTree = "<group>";
+		};
+		2106 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				200D /* SharedComponents.swift */,
+				200E /* PathlyMapView.swift */,
+				200F /* PitchView.swift */,
+				2010 /* OnboardingView.swift */,
+				2011 /* RouteSelectionView.swift */,
+				2012 /* RunView.swift */,
+				2013 /* SettingsView.swift */,
+				2014 /* RootView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		2107 /* ../Config */ = {
+			isa = PBXGroup;
+			children = (
+				2016 /* Base.xcconfig */,
+				2017 /* Debug.xcconfig */,
+				2018 /* Release.xcconfig */,
+				2019 /* Secrets.example.xcconfig */,
+				201A /* Secrets.xcconfig */,
+			);
+			path = ../Config;
+			sourceTree = "<group>";
+		};
+		2108 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				2015 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2200 /* Pathly */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2300 /* Build configuration list for PBXNativeTarget "Pathly" */;
+			buildPhases = (
+				3001 /* Sources */,
+				3000 /* Frameworks */,
+				3002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Pathly;
+			packageProductDependencies = (
+				4011 /* GoogleMaps */,
+				4012 /* GooglePlaces */,
+				4013 /* GoogleNavigation */,
+			);
+			productName = Pathly;
+			productReference = 1FFF /* Pathly.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2201 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					2200 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = 2301 /* Build configuration list for PBXProject "Pathly" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2100;
+			packageReferences = (
+				4001 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
+				4002 /* XCRemoteSwiftPackageReference "ios-places-sdk" */,
+				4003 /* XCRemoteSwiftPackageReference "ios-navigation-sdk" */,
+			);
+			productRefGroup = 2102 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2200 /* Pathly */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1015 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1001 /* PathlyApp.swift in Sources */,
+				1002 /* ContractModels.swift in Sources */,
+				1003 /* AppConfiguration.swift in Sources */,
+				1004 /* Persistence.swift in Sources */,
+				1005 /* APIClient.swift in Sources */,
+				1006 /* PlacesService.swift in Sources */,
+				1007 /* NavigationService.swift in Sources */,
+				1008 /* SensorServices.swift in Sources */,
+				1009 /* AudioPlaybackController.swift in Sources */,
+				100A /* VoiceInterruptService.swift in Sources */,
+				100B /* LiveSessionClient.swift in Sources */,
+				100C /* AppStore.swift in Sources */,
+				100D /* SharedComponents.swift in Sources */,
+				100E /* PathlyMapView.swift in Sources */,
+				100F /* PitchView.swift in Sources */,
+				1010 /* OnboardingView.swift in Sources */,
+				1011 /* RouteSelectionView.swift in Sources */,
+				1012 /* RunView.swift in Sources */,
+				1013 /* SettingsView.swift in Sources */,
+				1014 /* RootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2400 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2017 /* Debug.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(PATHLY_DEVELOPMENT_TEAM)";
+				ENABLE_PREVIEWS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pathly.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		2401 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2018 /* Release.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(PATHLY_DEVELOPMENT_TEAM)";
+				ENABLE_PREVIEWS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pathly.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		2402 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2017 /* Debug.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "$(PATHLY_DEVELOPMENT_TEAM)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		2403 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2018 /* Release.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "$(PATHLY_DEVELOPMENT_TEAM)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2300 /* Build configuration list for PBXNativeTarget "Pathly" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2400 /* Debug */,
+				2401 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		2301 /* Build configuration list for PBXProject "Pathly" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2402 /* Debug */,
+				2403 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4001 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-maps-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.10.0;
+			};
+		};
+		4002 /* XCRemoteSwiftPackageReference "ios-places-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-places-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.10.0;
+			};
+		};
+		4003 /* XCRemoteSwiftPackageReference "ios-navigation-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlemaps/ios-navigation-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4011 /* GoogleMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4001 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */;
+			productName = GoogleMaps;
+		};
+		4012 /* GooglePlaces */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4002 /* XCRemoteSwiftPackageReference "ios-places-sdk" */;
+			productName = GooglePlaces;
+		};
+		4013 /* GoogleNavigation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4003 /* XCRemoteSwiftPackageReference "ios-navigation-sdk" */;
+			productName = GoogleNavigation;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 2201 /* Project object */;
+}
