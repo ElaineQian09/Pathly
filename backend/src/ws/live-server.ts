@@ -1,5 +1,6 @@
 import { Server as HttpServer } from "node:http";
 import { WebSocketServer } from "ws";
+import { logger } from "../logger.js";
 import {
   InterruptResult,
   NewsItem,
@@ -65,6 +66,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
     }
 
     const sessionId = session.sessionId;
+    logger.info("ws.message.received", {
+      type: message.type,
+      sessionId
+    });
 
     switch (message.type) {
       case "session.join": {
@@ -73,6 +78,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           deps.sessionService.save(session);
         }
         deps.sessionService.setStatus(sessionId, "active");
+        logger.info("ws.session.ready", {
+          sessionId,
+          openingSpeaker: session.openingSpeaker
+        });
         socket.send(JSON.stringify({
           type: "session.ready",
           payload: {
@@ -97,6 +106,13 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           const places = await deps.placeService.getCandidates(parsed.data, session.routeSelection);
           const news = await deps.newsService.getCandidates(session.preferences);
           const segment = await deps.geminiAdapter.composePlayback(plan, session, places, news);
+          logger.info("ws.turn.generated", {
+            sessionId,
+            turnId: plan.turnId,
+            speaker: plan.speaker,
+            reason: plan.reason,
+            buckets: plan.contentBuckets
+          });
           socket.send(JSON.stringify({ type: "turn.plan", payload: plan }));
           socket.send(JSON.stringify({ type: "playback.segment", payload: segment }));
         }
@@ -105,6 +121,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           session.reconnectIssued = true;
           deps.sessionService.setStatus(sessionId, "reconnecting");
           deps.sessionService.save(session);
+          logger.warn("ws.session.reconnect_required", {
+            sessionId,
+            resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`
+          });
           socket.send(JSON.stringify({
             type: "session.reconnect_required",
             payload: {
@@ -120,6 +140,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
       case "quick_action": {
         deps.routerService.applyQuickAction(session, String(payload.action ?? ""));
         deps.sessionService.save(session);
+        logger.info("ws.quick_action.applied", {
+          sessionId,
+          action: String(payload.action ?? "")
+        });
         if (payload.action === "repeat" && session.lastTurnAt) {
           socket.send(JSON.stringify({
             type: "playback.filler",
@@ -148,6 +172,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         }
         const intent = /less|more|quiet|talk/i.test(text) ? "preference_change" : "question";
         deps.sessionService.save(session);
+        logger.info("ws.interrupt.text", {
+          sessionId,
+          intent
+        });
         socket.send(JSON.stringify({
           type: "interrupt.result",
           payload: await deps.geminiAdapter.composeInterruptResult(
@@ -164,14 +192,25 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         session.voiceInterruptChunks = [];
         session.interruptedPlaybackTurnId = session.lastTurnAt;
         deps.sessionService.save(session);
+        logger.info("ws.interrupt.voice.start", {
+          sessionId
+        });
         break;
       }
       case "interrupt.voice.chunk": {
         session.voiceInterruptChunks.push(String(payload.audioBase64 ?? ""));
         deps.sessionService.save(session);
+        logger.info("ws.interrupt.voice.chunk", {
+          sessionId,
+          chunkCount: session.voiceInterruptChunks.length
+        });
         break;
       }
       case "interrupt.voice.end": {
+        logger.info("ws.interrupt.voice.end", {
+          sessionId,
+          chunkCount: session.voiceInterruptChunks.length
+        });
         socket.send(JSON.stringify({
           type: "interrupt.result",
           payload: await deps.geminiAdapter.composeInterruptResult(
@@ -186,14 +225,23 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
       }
       case "session.pause": {
         deps.sessionService.setStatus(sessionId, "paused");
+        logger.info("ws.session.paused", {
+          sessionId
+        });
         break;
       }
       case "session.resume": {
         deps.sessionService.setStatus(sessionId, "active");
+        logger.info("ws.session.resumed", {
+          sessionId
+        });
         break;
       }
       case "session.end": {
         deps.sessionService.setStatus(sessionId, "ended");
+        logger.info("ws.session.ended", {
+          sessionId
+        });
         break;
       }
       case "session.preferences.update": {
@@ -203,6 +251,11 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         }
         deps.sessionService.updatePreferences(sessionId, parsed.data);
         const updatedSession = deps.sessionService.get(sessionId);
+        logger.info("ws.session.preferences.updated", {
+          sessionId,
+          talkDensity: parsed.data.talkDensity,
+          quietModeEnabled: parsed.data.quietModeEnabled
+        });
         socket.send(JSON.stringify({
           type: "session.preferences.updated",
           payload: {
@@ -213,6 +266,10 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         break;
       }
       default:
+        logger.warn("ws.message.unsupported", {
+          sessionId,
+          type: message.type
+        });
         socket.send(JSON.stringify({
           type: "error",
           payload: {
@@ -222,6 +279,9 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         }));
     }
   } catch (error) {
+    logger.error("ws.message.error", {
+      message: error instanceof Error ? error.message : "Invalid websocket message"
+    });
     socket.send(JSON.stringify({
       type: "error",
       payload: {
@@ -237,10 +297,21 @@ export const attachLiveServer = (server: HttpServer, deps: WsDependencies) => {
 
   wss.on("connection", (socket, request) => {
     const pathname = request.url?.split("?")[0] ?? "";
+    logger.info("ws.connection.open", {
+      path: pathname
+    });
     if (!pathname.startsWith("/v1/live")) {
+      logger.warn("ws.connection.rejected", {
+        path: pathname
+      });
       socket.close();
       return;
     }
+    socket.on("close", () => {
+      logger.info("ws.connection.closed", {
+        path: pathname
+      });
+    });
     socket.on("message", (data) => {
       void handleWsMessage(socket, deps, data.toString());
     });

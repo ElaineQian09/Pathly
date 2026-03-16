@@ -1,5 +1,6 @@
 import express from "express";
 import { z } from "zod";
+import { logger } from "../logger.js";
 import {
   createSessionRequestSchema,
   routeGenerationRequestSchema,
@@ -19,6 +20,18 @@ export type AppServices = {
 export const buildApp = ({ baseUrl, profileService, routeService, sessionService }: AppServices) => {
   const app = express();
   app.use(express.json());
+  app.use((request, response, next) => {
+    const startedAt = Date.now();
+    response.on("finish", () => {
+      logger.info("http.request", {
+        method: request.method,
+        path: request.path,
+        statusCode: response.statusCode,
+        durationMs: Date.now() - startedAt
+      });
+    });
+    next();
+  });
 
   app.get("/health", (_request, response) => {
     response.json({ ok: true, product: "Pathly" });
@@ -34,6 +47,9 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
   app.post("/v1/profile", (request, response) => {
     const parsed = userProfileSchema.safeParse(request.body);
     if (!parsed.success) {
+      logger.warn("http.profile.invalid", {
+        issues: parsed.error.issues.length
+      });
       response.status(400).json({
         ok: false,
         error: parsed.error.flatten()
@@ -50,6 +66,9 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
   app.post("/v1/routes/generate", async (request, response) => {
     const parsed = routeGenerationRequestSchema.safeParse(request.body);
     if (!parsed.success) {
+      logger.warn("http.routes_generate.invalid", {
+        issues: parsed.error.issues.length
+      });
       response.status(400).json({
         ok: false,
         error: parsed.error.flatten()
@@ -59,6 +78,11 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
 
     const { routeMode, durationMinutes, desiredCount, start } = parsed.data;
     const candidates = await routeService.generate(routeMode, durationMinutes, desiredCount, start);
+    logger.info("http.routes_generate.success", {
+      routeMode,
+      desiredCount,
+      returnedCount: candidates.length
+    });
     response.json({
       requestId: `routes_req_${crypto.randomUUID()}`,
       candidates
@@ -68,6 +92,9 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
   app.post("/v1/sessions", (request, response) => {
     const parsed = createSessionRequestSchema.safeParse(request.body);
     if (!parsed.success) {
+      logger.warn("http.sessions.invalid", {
+        issues: parsed.error.issues.length
+      });
       response.status(400).json({
         ok: false,
         error: parsed.error.flatten()
@@ -76,6 +103,11 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
     }
 
     const session = sessionService.create(parsed.data);
+    logger.info("http.sessions.created", {
+      sessionId: session.sessionId,
+      openingSpeaker: session.openingSpeaker,
+      routeMode: session.routeSelection.routeMode
+    });
     response.status(201).json({
       sessionId: session.sessionId,
       status: session.status,
@@ -86,6 +118,9 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     const message = error instanceof z.ZodError ? error.message : "Internal server error";
+    logger.error("http.unhandled_error", {
+      message
+    });
     response.status(500).json({
       ok: false,
       error: {
