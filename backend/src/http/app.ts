@@ -17,6 +17,11 @@ export type AppServices = {
   sessionService: SessionService;
 };
 
+const getErrorDetails = (error: unknown) => ({
+  message: error instanceof Error ? error.message : "Internal server error",
+  stack: error instanceof Error ? error.stack : undefined
+});
+
 export const buildApp = ({ baseUrl, profileService, routeService, sessionService }: AppServices) => {
   const app = express();
   app.use(express.json());
@@ -76,17 +81,41 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       return;
     }
 
-    const { routeMode, durationMinutes, desiredCount, start } = parsed.data;
-    const candidates = await routeService.generate(routeMode, durationMinutes, desiredCount, start);
-    logger.info("http.routes_generate.success", {
-      routeMode,
-      desiredCount,
-      returnedCount: candidates.length
-    });
-    response.json({
-      requestId: `routes_req_${crypto.randomUUID()}`,
-      candidates
-    });
+    try {
+      const { routeMode, durationMinutes, desiredCount, start } = parsed.data;
+      const candidates = await routeService.generate(routeMode, durationMinutes, desiredCount, start);
+      logger.info("http.routes_generate.success", {
+        routeMode,
+        desiredCount,
+        returnedCount: candidates.length
+      });
+
+      const payload = {
+        requestId: `routes_req_${crypto.randomUUID()}`,
+        candidates
+      };
+
+      try {
+        response.json(payload);
+      } catch (error) {
+        const details = getErrorDetails(error);
+        logger.error("http.routes_generate.response_error", {
+          routeMode,
+          desiredCount,
+          returnedCount: candidates.length,
+          ...details
+        });
+        throw error;
+      }
+    } catch (error) {
+      const details = getErrorDetails(error);
+      logger.error("http.routes_generate.error", {
+        routeMode: parsed.data.routeMode,
+        desiredCount: parsed.data.desiredCount,
+        ...details
+      });
+      throw error;
+    }
   });
 
   app.post("/v1/sessions", (request, response) => {
@@ -117,14 +146,16 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
   });
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-    const message = error instanceof z.ZodError ? error.message : "Internal server error";
+    const details = getErrorDetails(error);
     logger.error("http.unhandled_error", {
-      message
+      method: _request.method,
+      path: _request.path,
+      ...details
     });
     response.status(500).json({
       ok: false,
       error: {
-        message
+        message: details.message
       }
     });
   });
