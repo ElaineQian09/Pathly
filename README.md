@@ -257,7 +257,8 @@ Backend should:
 - initialize orchestration state
 - select the opening speaker
 - build the first turn package
-- return the first playback payload
+- return the first playback payload metadata
+- stream audio bytes immediately after metadata over websocket chunk events
 
 ## Turn Generation System
 
@@ -270,7 +271,7 @@ Every turn should follow this loop:
 5. router selects next speaker
 6. composer builds the next turn package
 7. audio is generated
-8. playback is returned to the client
+8. playback metadata is returned to the client and audio bytes stream over websocket
 9. backend prefetches the following turn while current playback runs
 
 ### Recommended Bucket Rules
@@ -420,7 +421,7 @@ Use for:
 
 - spoken turn generation
 - low-latency interruption response
-- active speaker playback flow
+- active speaker playback flow using streamed audio chunks, not clip URLs
 
 Do not use it as the primary place-retrieval layer.
 
@@ -549,7 +550,7 @@ The location and news pipeline should work like this:
 4. backend packages nearby landmarks, route progress, and selected news into structured turn context
 5. backend invokes Gemini planning layer
 6. backend invokes Gemini Live for the current speaker turn
-7. frontend receives playback payload and renders audio plus UI updates
+7. frontend receives playback metadata plus streamed PCM chunks and renders audio plus UI updates
 
 ### Place and Landmark Flow
 

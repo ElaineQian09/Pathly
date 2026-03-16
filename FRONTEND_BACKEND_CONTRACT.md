@@ -371,6 +371,16 @@ This document defines the MVP contract between the iOS client and the backend fo
 }
 ```
 
+### AudioStreamFormat
+
+```json
+{
+  "encoding": "pcm_s16le",
+  "sampleRateHz": 24000,
+  "channelCount": 1
+}
+```
+
 ### PlaybackPayload
 
 ```json
@@ -378,10 +388,14 @@ This document defines the MVP contract between the iOS client and the backend fo
   "turnId": "turn_456",
   "speaker": "maya",
   "segmentType": "main_turn",
-  "audioUrl": "https://example.com/audio/turn_456.mp3",
   "transcriptPreview": "You are about to hit one of the best sunrise stretches on the route...",
   "safeInterruptAfterMs": 4000,
-  "estimatedPlaybackMs": 17600
+  "estimatedPlaybackMs": 17600,
+  "audioFormat": {
+    "encoding": "pcm_s16le",
+    "sampleRateHz": 24000,
+    "channelCount": 1
+  }
 }
 ```
 
@@ -393,8 +407,24 @@ This document defines the MVP contract between the iOS client and the backend fo
   "speaker": "theo",
   "segmentType": "interrupt_response",
   "intent": "preference_change",
-  "audioUrl": "https://example.com/audio/turn_457.mp3",
-  "transcriptPreview": "Got it. Less news, more route context from here."
+  "transcriptPreview": "Got it. Less news, more route context from here.",
+  "estimatedPlaybackMs": 5200,
+  "audioFormat": {
+    "encoding": "pcm_s16le",
+    "sampleRateHz": 24000,
+    "channelCount": 1
+  }
+}
+```
+
+### PlaybackAudioChunkPayload
+
+```json
+{
+  "turnId": "turn_456",
+  "chunkIndex": 0,
+  "audioBase64": "base64_pcm_chunk",
+  "isFinalChunk": false
 }
 ```
 
@@ -839,6 +869,8 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
 
 #### `playback.segment`
 
+This event carries turn metadata only. Audio bytes are streamed separately over `playback.audio.chunk`.
+
 ```json
 {
   "type": "playback.segment",
@@ -846,10 +878,14 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "turnId": "turn_456",
     "speaker": "maya",
     "segmentType": "main_turn",
-    "audioUrl": "https://example.com/audio/turn_456.mp3",
     "transcriptPreview": "You are about to hit one of the best sunrise stretches on the route...",
     "safeInterruptAfterMs": 4000,
-    "estimatedPlaybackMs": 17600
+    "estimatedPlaybackMs": 17600,
+    "audioFormat": {
+      "encoding": "pcm_s16le",
+      "sampleRateHz": 24000,
+      "channelCount": 1
+    }
   }
 }
 ```
@@ -863,10 +899,30 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "turnId": "filler_001",
     "speaker": "theo",
     "segmentType": "filler",
-    "audioUrl": "https://example.com/audio/filler_001.mp3",
     "transcriptPreview": "Hold on, this next bit is worth it.",
     "safeInterruptAfterMs": 0,
-    "estimatedPlaybackMs": 1800
+    "estimatedPlaybackMs": 1800,
+    "audioFormat": {
+      "encoding": "pcm_s16le",
+      "sampleRateHz": 24000,
+      "channelCount": 1
+    }
+  }
+}
+```
+
+#### `playback.audio.chunk`
+
+`playback.segment`, `playback.filler`, and `interrupt.result` must be followed by one or more `playback.audio.chunk` events keyed by `turnId`.
+
+```json
+{
+  "type": "playback.audio.chunk",
+  "payload": {
+    "turnId": "turn_456",
+    "chunkIndex": 0,
+    "audioBase64": "base64_pcm_chunk",
+    "isFinalChunk": false
   }
 }
 ```
@@ -881,8 +937,13 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "speaker": "theo",
     "segmentType": "interrupt_response",
     "intent": "preference_change",
-    "audioUrl": "https://example.com/audio/turn_457.mp3",
-    "transcriptPreview": "Got it. Less news, more local context from here."
+    "transcriptPreview": "Got it. Less news, more local context from here.",
+    "estimatedPlaybackMs": 5200,
+    "audioFormat": {
+      "encoding": "pcm_s16le",
+      "sampleRateHz": 24000,
+      "channelCount": 1
+    }
   }
 }
 ```
@@ -974,4 +1035,4 @@ Backend owns:
 
 - whether host renaming will be supported
 - whether transcript history beyond the compact strip will be persisted
-- whether playback audio will later move from URL-based clips to streamed chunks
+- whether frontend should later acknowledge chunk receipt for stricter loss recovery

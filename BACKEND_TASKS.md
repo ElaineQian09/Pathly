@@ -125,6 +125,7 @@ Backend owns orchestration. Frontend should only send structured context and use
 - [ ] Emit `turn.plan`
 - [ ] Emit `playback.segment`
 - [ ] Emit `playback.filler`
+- [ ] Emit `playback.audio.chunk`
 - [ ] Emit `interrupt.result`
 - [ ] Emit `session.preferences.updated`
 - [ ] Emit `session.reconnect_required`
@@ -316,9 +317,12 @@ Backend router should make explicit decisions instead of relying on model intuit
 ## Audio and Playback Payloads
 
 - [ ] Return `turn.plan` before playback when useful
-- [ ] Return `playback.segment` with `audioUrl`
-- [ ] Return `playback.filler` when generation gap appears
-- [ ] Return `interrupt.result` for user-driven overrides
+- [ ] Return `playback.segment` as metadata only
+- [ ] Return `playback.filler` as metadata only when generation gap appears
+- [ ] Return `interrupt.result` as metadata only for user-driven overrides
+- [ ] Stream audio bytes over repeated `playback.audio.chunk` events
+- [ ] Normalize Gemini Live audio into `pcm_s16le`, `24000 Hz`, mono before sending to frontend
+- [ ] Mark the last chunk with `isFinalChunk = true`
 - [ ] Prevent duplicate segment delivery
 - [ ] Track segment acknowledgements later if needed
 

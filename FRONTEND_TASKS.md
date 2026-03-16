@@ -358,6 +358,8 @@ Frontend should not own:
 
 - [ ] Playback queue that guarantees one active segment at a time
 - [ ] Support host-specific audio segments
+- [ ] Support streamed audio chunks over websocket instead of clip URLs
+- [ ] Decode `pcm_s16le` chunks into a native playback pipeline
 - [ ] Support filler clips
 - [ ] Support stop, duck, resume, and cancel
 - [ ] Prevent overlapping host audio
@@ -389,6 +391,7 @@ Frontend should not own:
 - [ ] Handle `turn.plan`
 - [ ] Handle `playback.segment`
 - [ ] Handle `playback.filler`
+- [ ] Handle `playback.audio.chunk`
 - [ ] Handle `interrupt.result`
 - [ ] Handle `session.preferences.updated`
 - [ ] Handle `session.reconnect_required`
