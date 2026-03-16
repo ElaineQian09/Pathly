@@ -53,7 +53,7 @@ export const routeGenerationRequestSchema = z.object({
     latitude: z.number(),
     longitude: z.number()
   }),
-  destinationQuery: z.string().nullable()
+  destinationQuery: z.string().nullable().optional().default(null)
 });
 
 export const navigationStepSchema = z.object({

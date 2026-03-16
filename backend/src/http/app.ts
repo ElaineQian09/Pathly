@@ -3,6 +3,7 @@ import { z } from "zod";
 import { logger } from "../logger.js";
 import {
   createSessionRequestSchema,
+  routeCandidateSchema,
   routeGenerationRequestSchema,
   userProfileSchema
 } from "../models/types.js";
@@ -72,7 +73,10 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
     const parsed = routeGenerationRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       logger.warn("http.routes_generate.invalid", {
-        issues: parsed.error.issues.length
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message
+        }))
       });
       response.status(400).json({
         ok: false,
@@ -84,15 +88,28 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
     try {
       const { routeMode, durationMinutes, desiredCount, start } = parsed.data;
       const candidates = await routeService.generate(routeMode, durationMinutes, desiredCount, start);
+      const normalizedCandidates = routeCandidateSchema.array().safeParse(candidates);
+      if (!normalizedCandidates.success) {
+        logger.error("http.routes_generate.contract_error", {
+          routeMode,
+          desiredCount,
+          issues: normalizedCandidates.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message
+          }))
+        });
+        throw new Error("Route generation response did not match contract");
+      }
+
       logger.info("http.routes_generate.success", {
         routeMode,
         desiredCount,
-        returnedCount: candidates.length
+        returnedCount: normalizedCandidates.data.length
       });
 
       const payload = {
         requestId: `routes_req_${crypto.randomUUID()}`,
-        candidates
+        candidates: normalizedCandidates.data
       };
 
       try {
