@@ -29,7 +29,7 @@ export class RouterService {
     let reason = "steady_progress";
 
     if (snapshot.nav.offRoute || snapshot.nav.approachingManeuver) {
-      buckets.push("navigation");
+      buckets.push("nudge");
       reason = snapshot.nav.offRoute ? "off_route_override" : "navigation_override";
     } else {
       const areaKey = areaKeyFor(snapshot);

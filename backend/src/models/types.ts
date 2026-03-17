@@ -20,8 +20,7 @@ export const contentBucketSchema = z.enum([
   "news",
   "nudge",
   "banter",
-  "run_metrics",
-  "navigation"
+  "run_metrics"
 ]);
 
 export const userProfileSchema = z.object({

@@ -221,9 +221,17 @@ describe("Pathly backend", () => {
     const playbackSegment = messages[playbackSegmentIndex];
     const interruptResult = messages.find((message) => message.type === "interrupt.result");
     const chunkMessages = messages.filter((message) => message.type === "playback.audio.chunk");
+    const turnPlan = messages.find((message) => message.type === "turn.plan");
+    const firstChunkPayload = chunkMessages[0]?.payload as
+      | { audioBase64?: string; chunkIndex?: number; isFinalChunk?: boolean }
+      | undefined;
+    const firstChunkBuffer = Buffer.from(firstChunkPayload?.audioBase64 ?? "", "base64");
 
     expect(playbackSegmentIndex).toBeGreaterThanOrEqual(0);
     expect(firstChunkIndex).toBeGreaterThan(playbackSegmentIndex);
+    expect(turnPlan?.payload).not.toMatchObject({
+      contentBuckets: expect.arrayContaining(["navigation"])
+    });
     expect(playbackSegment?.payload).not.toHaveProperty("audioUrl");
     expect(playbackSegment?.payload).toMatchObject({
       audioFormat: {
@@ -240,6 +248,11 @@ describe("Pathly backend", () => {
     expect(chunkMessages.at(-1)?.payload).toMatchObject({
       isFinalChunk: true
     });
+    expect(firstChunkBuffer.length).toBeGreaterThan(0);
+    expect(firstChunkBuffer.length % 2).toBe(0);
+    expect(firstChunkBuffer.subarray(0, 4).toString("ascii")).not.toBe("RIFF");
+    expect(firstChunkBuffer.subarray(0, 4).toString("ascii")).not.toBe("OggS");
+    expect(firstChunkBuffer.subarray(0, 3).toString("ascii")).not.toBe("ID3");
 
     const reloadedStore = new FileStore(dataDir);
     const restoredSessionService = new SessionService(reloadedStore);

@@ -12,8 +12,6 @@ import type {
 
 const bucketLine = (bucket: ContentBucket, places: PlaceCandidate[], news: NewsItem[]) => {
   switch (bucket) {
-    case "navigation":
-      return "Stay alert for the next maneuver while keeping your rhythm under control.";
     case "local_context":
       return places[0]?.fact ?? "This stretch opens into a useful local detail worth noticing.";
     case "news":
