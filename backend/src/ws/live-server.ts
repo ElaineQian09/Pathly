@@ -79,6 +79,7 @@ const sendSegmentWithAudio = (
   message: GeneratedAudioMessage<PlaybackSegment | PlaybackFiller | InterruptResult>
 ) => {
   const { audioChunks, ...metadata } = message;
+  const actualAudioBytes = audioChunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, "base64"), 0);
   logger.info("ws.playback.segment.sent", {
     sessionId,
     eventType,
@@ -86,6 +87,9 @@ const sendSegmentWithAudio = (
     speaker: metadata.speaker,
     segmentType: metadata.segmentType,
     estimatedPlaybackMs: metadata.estimatedPlaybackMs,
+    sampleRateHz: metadata.audioFormat.sampleRateHz,
+    channelCount: metadata.audioFormat.channelCount,
+    actualAudioBytes,
     chunkCount: audioChunks.length
   });
   socket.send(JSON.stringify({
