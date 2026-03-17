@@ -80,6 +80,9 @@ const buildPcmBuffer = (transcriptPreview: string, estimatedPlaybackMs: number) 
   return buffer;
 };
 
+const playbackMsForBuffer = (buffer: Buffer) =>
+  Math.round((buffer.length / (SAMPLE_RATE_HZ * CHANNEL_COUNT * BYTES_PER_SAMPLE)) * 1000);
+
 const assertPathlyPcm = (buffer: Buffer) => {
   if (buffer.length === 0 || buffer.length % BYTES_PER_SAMPLE !== 0) {
     throw new Error("Generated audio is not aligned to pcm_s16le sample boundaries.");
@@ -107,8 +110,10 @@ export const createGeneratedAudioMessage = <T extends AudioMetadata>(
 ): GeneratedAudioMessage<T> => {
   const pcmBuffer = buildPcmBuffer(metadata.transcriptPreview, metadata.estimatedPlaybackMs);
   assertPathlyPcm(pcmBuffer);
+  const actualPlaybackMs = playbackMsForBuffer(pcmBuffer);
   return {
     ...metadata,
+    estimatedPlaybackMs: actualPlaybackMs,
     audioChunks: chunkBuffer(pcmBuffer)
-  } as GeneratedAudioMessage<T>;
+  } as unknown as GeneratedAudioMessage<T>;
 };
