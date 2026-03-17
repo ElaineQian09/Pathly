@@ -32,7 +32,12 @@ export const createServices = () => {
   const profileService = new ProfileService(store);
   const routerService = new RouterService();
   const checkpointService = new CheckpointService(sessionService);
-  const geminiAdapter = new RealGeminiAdapter(config.geminiApiKey, config.geminiModel, mockGemini);
+  const geminiAdapter = new RealGeminiAdapter(
+    config.geminiApiKey,
+    config.geminiLiveModel,
+    config.geminiLiveVoice,
+    mockGemini
+  );
 
   return {
     config,

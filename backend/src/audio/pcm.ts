@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { InterruptResult, PlaybackFiller, PlaybackSegment } from "../models/types.js";
 
 const SAMPLE_RATE_HZ = 24000;
@@ -10,11 +12,18 @@ const ID3_HEADER = Buffer.from("ID3");
 
 const hasPrefix = (buffer: Buffer, prefix: Buffer) =>
   buffer.length >= prefix.length && buffer.subarray(0, prefix.length).equals(prefix);
+const DEBUG_AUDIO_DIR = process.env.PATHLY_DEBUG_AUDIO_DIR ?? null;
 
 export const PATHLY_AUDIO_FORMAT = {
   encoding: "pcm_s16le" as const,
   sampleRateHz: 24000 as const,
   channelCount: 1 as const
+};
+
+export type PcmAudioFormat = {
+  encoding: "pcm_s16le";
+  sampleRateHz: number;
+  channelCount: number;
 };
 
 type AudioMetadata = PlaybackSegment | PlaybackFiller | InterruptResult;
@@ -83,6 +92,26 @@ const buildPcmBuffer = (transcriptPreview: string, estimatedPlaybackMs: number) 
 const playbackMsForBuffer = (buffer: Buffer) =>
   Math.round((buffer.length / (SAMPLE_RATE_HZ * CHANNEL_COUNT * BYTES_PER_SAMPLE)) * 1000);
 
+const wavHeaderFor = (pcmByteLength: number) => {
+  const blockAlign = CHANNEL_COUNT * BYTES_PER_SAMPLE;
+  const byteRate = SAMPLE_RATE_HZ * blockAlign;
+  const buffer = Buffer.alloc(44);
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + pcmByteLength, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(CHANNEL_COUNT, 22);
+  buffer.writeUInt32LE(SAMPLE_RATE_HZ, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(pcmByteLength, 40);
+  return buffer;
+};
+
 const assertPathlyPcm = (buffer: Buffer) => {
   if (buffer.length === 0 || buffer.length % BYTES_PER_SAMPLE !== 0) {
     throw new Error("Generated audio is not aligned to pcm_s16le sample boundaries.");
@@ -91,6 +120,76 @@ const assertPathlyPcm = (buffer: Buffer) => {
   if (hasPrefix(buffer, RIFF_HEADER) || hasPrefix(buffer, OGG_HEADER) || hasPrefix(buffer, ID3_HEADER)) {
     throw new Error("Generated audio must be raw pcm_s16le, not a container or compressed stream.");
   }
+};
+
+export const parseLiveAudioMimeType = (mimeType: string | null | undefined): PcmAudioFormat => {
+  if (!mimeType) {
+    return PATHLY_AUDIO_FORMAT;
+  }
+
+  const normalized = mimeType.toLowerCase();
+  if (!normalized.startsWith("audio/pcm")) {
+    throw new Error(`Unsupported Gemini Live audio mimeType: ${mimeType}`);
+  }
+  if (
+    normalized.includes("riff") ||
+    normalized.includes("wav") ||
+    normalized.includes("ogg") ||
+    normalized.includes("aac") ||
+    normalized.includes("opus") ||
+    normalized.includes("mp3")
+  ) {
+    throw new Error(`Gemini Live audio mimeType is not raw PCM: ${mimeType}`);
+  }
+  if (normalized.includes("float") || normalized.includes("f32") || normalized.includes("unsigned") || normalized.includes("big-endian")) {
+    throw new Error(`Unsupported Gemini Live PCM subtype: ${mimeType}`);
+  }
+
+  const rateMatch = normalized.match(/rate=(\d+)/);
+  const channelsMatch = normalized.match(/(?:channels|channelcount)=(\d+)/);
+  return {
+    encoding: "pcm_s16le",
+    sampleRateHz: rateMatch ? Number(rateMatch[1]) : 24000,
+    channelCount: channelsMatch ? Number(channelsMatch[1]) : 1
+  };
+};
+
+const downmixToMono = (buffer: Buffer, channelCount: number) => {
+  if (channelCount === 1) {
+    return buffer;
+  }
+
+  const sampleFrameCount = Math.floor(buffer.length / (BYTES_PER_SAMPLE * channelCount));
+  const mono = Buffer.alloc(sampleFrameCount * BYTES_PER_SAMPLE);
+  for (let frameIndex = 0; frameIndex < sampleFrameCount; frameIndex += 1) {
+    let total = 0;
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      const offset = (frameIndex * channelCount + channelIndex) * BYTES_PER_SAMPLE;
+      total += buffer.readInt16LE(offset);
+    }
+    mono.writeInt16LE(clamp16(total / channelCount), frameIndex * BYTES_PER_SAMPLE);
+  }
+  return mono;
+};
+
+const resampleTo24k = (buffer: Buffer, inputSampleRate: number) => {
+  if (inputSampleRate === SAMPLE_RATE_HZ) {
+    return buffer;
+  }
+
+  const inputSampleCount = buffer.length / BYTES_PER_SAMPLE;
+  const outputSampleCount = Math.max(1, Math.round((inputSampleCount * SAMPLE_RATE_HZ) / inputSampleRate));
+  const output = Buffer.alloc(outputSampleCount * BYTES_PER_SAMPLE);
+  for (let outputIndex = 0; outputIndex < outputSampleCount; outputIndex += 1) {
+    const sourcePosition = (outputIndex * inputSampleRate) / SAMPLE_RATE_HZ;
+    const leftIndex = Math.floor(sourcePosition);
+    const rightIndex = Math.min(inputSampleCount - 1, leftIndex + 1);
+    const mix = sourcePosition - leftIndex;
+    const leftSample = buffer.readInt16LE(Math.min(leftIndex, inputSampleCount - 1) * BYTES_PER_SAMPLE);
+    const rightSample = buffer.readInt16LE(rightIndex * BYTES_PER_SAMPLE);
+    output.writeInt16LE(clamp16(leftSample + (rightSample - leftSample) * mix), outputIndex * BYTES_PER_SAMPLE);
+  }
+  return output;
 };
 
 const chunkBuffer = (buffer: Buffer, chunkMs = DEFAULT_CHUNK_MS) => {
@@ -105,15 +204,54 @@ const chunkBuffer = (buffer: Buffer, chunkMs = DEFAULT_CHUNK_MS) => {
   return chunks.length > 0 ? chunks : [Buffer.alloc(BYTES_PER_SAMPLE).toString("base64")];
 };
 
+const assertChunkRoundTrip = (source: Buffer, chunks: string[]) => {
+  const rebuilt = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk, "base64")));
+  if (!rebuilt.equals(source)) {
+    throw new Error("PCM chunk base64 round-trip mismatch.");
+  }
+};
+
+const maybeDumpDebugWav = (turnId: string, pcmBuffer: Buffer) => {
+  if (!DEBUG_AUDIO_DIR) {
+    return;
+  }
+
+  fs.mkdirSync(DEBUG_AUDIO_DIR, { recursive: true });
+  const outputPath = path.join(DEBUG_AUDIO_DIR, `${turnId}.wav`);
+  fs.writeFileSync(outputPath, Buffer.concat([wavHeaderFor(pcmBuffer.length), pcmBuffer]));
+};
+
+export const createGeneratedAudioMessageFromPcm = <T extends AudioMetadata>(
+  metadata: T,
+  pcmBuffer: Buffer,
+  inputFormat: PcmAudioFormat
+): GeneratedAudioMessage<T> => {
+  if (inputFormat.channelCount < 1) {
+    throw new Error(`Invalid PCM channel count: ${inputFormat.channelCount}`);
+  }
+  if (inputFormat.sampleRateHz < 1000) {
+    throw new Error(`Invalid PCM sample rate: ${inputFormat.sampleRateHz}`);
+  }
+
+  let normalizedBuffer = downmixToMono(pcmBuffer, inputFormat.channelCount);
+  normalizedBuffer = resampleTo24k(normalizedBuffer, inputFormat.sampleRateHz);
+  assertPathlyPcm(normalizedBuffer);
+  const actualPlaybackMs = playbackMsForBuffer(normalizedBuffer);
+  const audioChunks = chunkBuffer(normalizedBuffer);
+  assertChunkRoundTrip(normalizedBuffer, audioChunks);
+  maybeDumpDebugWav(metadata.turnId, normalizedBuffer);
+
+  return {
+    ...metadata,
+    audioFormat: PATHLY_AUDIO_FORMAT,
+    estimatedPlaybackMs: actualPlaybackMs,
+    audioChunks
+  } as unknown as GeneratedAudioMessage<T>;
+};
+
 export const createGeneratedAudioMessage = <T extends AudioMetadata>(
   metadata: T
 ): GeneratedAudioMessage<T> => {
   const pcmBuffer = buildPcmBuffer(metadata.transcriptPreview, metadata.estimatedPlaybackMs);
-  assertPathlyPcm(pcmBuffer);
-  const actualPlaybackMs = playbackMsForBuffer(pcmBuffer);
-  return {
-    ...metadata,
-    estimatedPlaybackMs: actualPlaybackMs,
-    audioChunks: chunkBuffer(pcmBuffer)
-  } as unknown as GeneratedAudioMessage<T>;
+  return createGeneratedAudioMessageFromPcm(metadata, pcmBuffer, PATHLY_AUDIO_FORMAT);
 };
