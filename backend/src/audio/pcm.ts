@@ -4,6 +4,12 @@ const SAMPLE_RATE_HZ = 24000;
 const CHANNEL_COUNT = 1;
 const BYTES_PER_SAMPLE = 2;
 const DEFAULT_CHUNK_MS = 1200;
+const RIFF_HEADER = Buffer.from("RIFF");
+const OGG_HEADER = Buffer.from("OggS");
+const ID3_HEADER = Buffer.from("ID3");
+
+const hasPrefix = (buffer: Buffer, prefix: Buffer) =>
+  buffer.length >= prefix.length && buffer.subarray(0, prefix.length).equals(prefix);
 
 export const PATHLY_AUDIO_FORMAT = {
   encoding: "pcm_s16le" as const,
@@ -74,6 +80,16 @@ const buildPcmBuffer = (transcriptPreview: string, estimatedPlaybackMs: number) 
   return buffer;
 };
 
+const assertPathlyPcm = (buffer: Buffer) => {
+  if (buffer.length === 0 || buffer.length % BYTES_PER_SAMPLE !== 0) {
+    throw new Error("Generated audio is not aligned to pcm_s16le sample boundaries.");
+  }
+
+  if (hasPrefix(buffer, RIFF_HEADER) || hasPrefix(buffer, OGG_HEADER) || hasPrefix(buffer, ID3_HEADER)) {
+    throw new Error("Generated audio must be raw pcm_s16le, not a container or compressed stream.");
+  }
+};
+
 const chunkBuffer = (buffer: Buffer, chunkMs = DEFAULT_CHUNK_MS) => {
   const chunkByteLength = Math.max(
     BYTES_PER_SAMPLE,
@@ -90,6 +106,7 @@ export const createGeneratedAudioMessage = <T extends AudioMetadata>(
   metadata: T
 ): GeneratedAudioMessage<T> => {
   const pcmBuffer = buildPcmBuffer(metadata.transcriptPreview, metadata.estimatedPlaybackMs);
+  assertPathlyPcm(pcmBuffer);
   return {
     ...metadata,
     audioChunks: chunkBuffer(pcmBuffer)
