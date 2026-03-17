@@ -674,3 +674,178 @@ The app should never assume one uninterrupted model connection for a long run.
 ## Delivery Principle
 
 If there is a tradeoff between perfect model cleverness and smooth user experience during a real run, Pathly should always choose smoothness.
+
+## Reproducible Testing
+
+The backend code lives in [`backend/`](./backend).
+
+### Local Backend Setup
+
+Install dependencies:
+
+```bash
+cd backend
+npm install
+```
+
+Run the test suite:
+
+```bash
+npm test
+```
+
+Build the backend:
+
+```bash
+npm run build
+```
+
+Start the backend locally:
+
+```bash
+npm run start
+```
+
+Expected local health check:
+
+```bash
+curl http://localhost:3000/health
+```
+
+Expected response:
+
+```json
+{"ok":true,"product":"Pathly"}
+```
+
+### Route Generation Smoke Test
+
+Run a contract-correct loop request:
+
+```bash
+curl -X POST http://localhost:3000/v1/routes/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "routeMode": "loop",
+    "durationMinutes": 45,
+    "desiredCount": 3,
+    "start": {
+      "latitude": 41.8819,
+      "longitude": -87.6278
+    },
+    "destinationQuery": null
+  }'
+```
+
+Expected behavior:
+
+- HTTP `200`
+- response shape:
+
+```json
+{
+  "requestId": "routes_req_xxx",
+  "candidates": [
+    {
+      "routeId": "route_loop_01",
+      "navigationPayload": {
+        "routeToken": null,
+        "legs": [
+          {
+            "steps": [
+              {
+                "instruction": "..."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Session Creation Smoke Test
+
+After generating a route candidate, create a session:
+
+```bash
+curl -X POST http://localhost:3000/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profile": {
+      "nickname": "Luna",
+      "hostStyle": "sarcastic",
+      "preferredSpeakers": ["maya", "theo"],
+      "routeModeDefault": "loop",
+      "durationMinutesDefault": 45,
+      "newsCategories": ["tech", "world"],
+      "newsDensity": "medium",
+      "talkDensityDefault": "medium",
+      "quietModeDefault": false
+    },
+    "routeSelection": {
+      "selectedRouteId": "route_loop_01",
+      "routeMode": "loop",
+      "durationMinutes": 45,
+      "selectedCandidate": {
+        "routeId": "route_loop_01",
+        "routeMode": "loop",
+        "label": "Loop Candidate 1",
+        "distanceMeters": 7100,
+        "estimatedDurationSeconds": 2760,
+        "polyline": "encoded_polyline",
+        "highlights": ["steady pacing sections", "good landmark density"],
+        "durationFitScore": 0.91,
+        "routeComplexityScore": 0.32,
+        "startLatitude": 41.8819,
+        "startLongitude": -87.6278,
+        "endLatitude": 41.8821,
+        "endLongitude": -87.6276,
+        "apiSource": "mock_routes_api",
+        "navigationPayload": {
+          "routeToken": null,
+          "legs": [
+            {
+              "legIndex": 0,
+              "distanceMeters": 7100,
+              "durationSeconds": 2760,
+              "steps": [
+                {
+                  "stepIndex": 0,
+                  "instruction": "Head out smoothly from the start point",
+                  "distanceMeters": 850,
+                  "durationSeconds": 320,
+                  "maneuver": "depart"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }'
+```
+
+Expected behavior:
+
+- HTTP `201`
+- response includes:
+  - `sessionId`
+  - `status`
+  - `websocketUrl`
+  - `openingSpeaker`
+
+### Deployed Backend
+
+Current deployed backend base URL:
+
+```text
+https://pathly-production.up.railway.app
+```
+
+Quick deployed health check:
+
+```bash
+curl https://pathly-production.up.railway.app/health
+```
