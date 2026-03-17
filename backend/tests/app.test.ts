@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPathlyServer } from "../src/index.js";
 import { MockGeminiAdapter } from "../src/adapters/gemini-adapter.js";
+import { GoogleRoutesProvider } from "../src/adapters/google-routes-provider.js";
 import { MockPlacesProvider } from "../src/adapters/places-provider.js";
 import { MockRoutesProvider } from "../src/adapters/routes-provider.js";
 import { MockRssProvider } from "../src/adapters/rss-provider.js";
@@ -93,6 +94,17 @@ describe("Pathly backend", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("refuses to return mock routes when Google Routes is unavailable", async () => {
+    const provider = new GoogleRoutesProvider(null, new MockRoutesProvider());
+
+    await expect(
+      provider.generateCandidates("loop", 45, 3, {
+        latitude: 41.8819,
+        longitude: -87.6278
+      })
+    ).rejects.toThrow("Google Routes API key is missing");
   });
 
   it("creates a session and handles join, preferences, planning, playback, and interrupts", async () => {

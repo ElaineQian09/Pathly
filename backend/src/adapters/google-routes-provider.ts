@@ -162,7 +162,10 @@ export class GoogleRoutesProvider {
     start: LatLng
   ): Promise<RouteCandidate[]> {
     if (!this.apiKey) {
-      return this.fallback.generateCandidates(routeMode, durationMinutes, desiredCount, start);
+      logger.error("routes.generate.unavailable", {
+        reason: "missing_google_api_key"
+      });
+      throw new Error("Google Routes API key is missing; refusing to return mock routes.");
     }
 
     const targetCount = routeMode === "loop" ? Math.max(3, desiredCount) : desiredCount;
@@ -189,6 +192,12 @@ export class GoogleRoutesProvider {
       if (!route) {
         throw new Error("Google Routes API returned no routes");
       }
+      if (!route.polyline?.encodedPolyline) {
+        throw new Error("Google Routes API returned no encoded polyline");
+      }
+      if (!routeToken) {
+        throw new Error("Google Routes API did not return a usable routeToken");
+      }
 
       const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
       const estimatedDurationSeconds = parseDurationSeconds(route.duration) || durationMinutes * 60;
@@ -213,7 +222,7 @@ export class GoogleRoutesProvider {
         startLongitude: start.longitude,
         endLatitude: endPoint.latitude,
         endLongitude: endPoint.longitude,
-        apiSource: "google_routes_api",
+        apiSource: "routes_api",
         navigationPayload: {
           routeToken,
           legs: legSteps(route)
@@ -225,9 +234,20 @@ export class GoogleRoutesProvider {
     const fulfilled = settled
       .flatMap((result) => (result.status === "fulfilled" ? [result.value] : []))
       .sort((left, right) => (right.durationFitScore - right.routeComplexityScore) - (left.durationFitScore - left.routeComplexityScore));
+    if (fulfilled.length === 0) {
+      const failures = settled.flatMap((result) =>
+        result.status === "rejected"
+          ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
+          : []
+      );
+      logger.error("routes.generate.failed", {
+        routeMode,
+        desiredCount,
+        failures
+      });
+      throw new Error("Google Routes API failed to produce a valid real route candidate.");
+    }
 
-    return fulfilled.length > 0
-      ? fulfilled.slice(0, targetCount)
-      : this.fallback.generateCandidates(routeMode, durationMinutes, desiredCount, start);
+    return fulfilled.slice(0, targetCount);
   }
 }
