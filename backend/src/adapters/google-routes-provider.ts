@@ -1,3 +1,4 @@
+import { NoRouteCandidatesError } from "../errors.js";
 import { logger } from "../logger.js";
 import { requireOk } from "./http.js";
 import { MockRoutesProvider } from "./routes-provider.js";
@@ -94,6 +95,16 @@ export class GoogleRoutesProvider {
       fieldMask?: string;
     }
   ): Promise<ComputeRoutesResponse> {
+    logger.info("routes.compute.request", {
+      travelMode: options?.travelMode ?? "WALK",
+      routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
+      fieldMask:
+        options?.fieldMask ??
+        "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.maneuver",
+      origin,
+      destination,
+      intermediateCount: intermediates.length
+    });
     const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
       method: "POST",
       headers: {
@@ -130,7 +141,14 @@ export class GoogleRoutesProvider {
     });
 
     await requireOk(response, "Google Routes API");
-    return (await response.json()) as ComputeRoutesResponse;
+    const body = (await response.json()) as ComputeRoutesResponse;
+    logger.info("routes.compute.response", {
+      routeCount: body.routes?.length ?? 0,
+      hasPolyline: Boolean(body.routes?.[0]?.polyline?.encodedPolyline),
+      hasLegs: Boolean(body.routes?.[0]?.legs?.length),
+      hasRouteToken: Boolean(body.routes?.[0]?.routeToken)
+    });
+    return body;
   }
 
   private async computeRouteToken(origin: LatLng, destination: LatLng, intermediates: LatLng[]): Promise<string | null> {
@@ -176,58 +194,67 @@ export class GoogleRoutesProvider {
       const destinationDistance = routeMode === "out_back" ? targetDistanceMeters / 2 : targetDistanceMeters * 0.82;
       const syntheticDestination = metersToLatLngOffset(start, destinationDistance, bearing);
       const loopWaypoint = metersToLatLngOffset(start, targetDistanceMeters / 3, bearing + 65);
-      const response = await this.computeRoute(
-        start,
-        routeMode === "loop" ? start : syntheticDestination,
-        routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : []
-      );
-      const intermediates = routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
-      const routeToken = await this.computeRouteToken(
-        start,
-        routeMode === "loop" ? start : syntheticDestination,
-        intermediates
-      );
+      const destination = routeMode === "loop" ? start : syntheticDestination;
+      const intermediates =
+        routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
 
-      const route = response.routes?.[0];
-      if (!route) {
-        throw new Error("Google Routes API returned no routes");
-      }
-      if (!route.polyline?.encodedPolyline) {
-        throw new Error("Google Routes API returned no encoded polyline");
-      }
-      if (!routeToken) {
-        throw new Error("Google Routes API did not return a usable routeToken");
-      }
+      try {
+        const response = await this.computeRoute(start, destination, intermediates);
+        const routeToken = await this.computeRouteToken(start, destination, intermediates);
 
-      const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
-      const estimatedDurationSeconds = parseDurationSeconds(route.duration) || durationMinutes * 60;
-      const endPoint = routeMode === "loop" ? start : syntheticDestination;
-      const durationFitScore = Math.max(0, 1 - Math.abs(estimatedDurationSeconds - durationMinutes * 60) / (durationMinutes * 60));
-      const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
-
-      return {
-        routeId: `route_${routeMode}_${String(index + 1).padStart(2, "0")}`,
-        routeMode,
-        label: routeLabel(routeMode, index),
-        distanceMeters,
-        estimatedDurationSeconds,
-        polyline: route.polyline?.encodedPolyline ?? "",
-        highlights: [
-          routeMode === "loop" ? "google-routed loop structure" : "google-routed running line",
-          complexityBase <= 8 ? "lower turn complexity" : "more detailed urban routing"
-        ],
-        durationFitScore: Number(durationFitScore.toFixed(2)),
-        routeComplexityScore: Number(Math.min(1, complexityBase / 20).toFixed(2)),
-        startLatitude: start.latitude,
-        startLongitude: start.longitude,
-        endLatitude: endPoint.latitude,
-        endLongitude: endPoint.longitude,
-        apiSource: "routes_api",
-        navigationPayload: {
-          routeToken,
-          legs: legSteps(route)
+        const route = response.routes?.[0];
+        if (!route) {
+          throw new Error("no_routes");
         }
-      } satisfies RouteCandidate;
+        if (!route.polyline?.encodedPolyline) {
+          throw new Error("missing_polyline");
+        }
+        if (!routeToken) {
+          throw new Error("missing_route_token");
+        }
+
+        const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
+        const estimatedDurationSeconds = parseDurationSeconds(route.duration) || durationMinutes * 60;
+        const endPoint = routeMode === "loop" ? start : syntheticDestination;
+        const durationFitScore = Math.max(0, 1 - Math.abs(estimatedDurationSeconds - durationMinutes * 60) / (durationMinutes * 60));
+        const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
+
+        return {
+          routeId: `route_${routeMode}_${String(index + 1).padStart(2, "0")}`,
+          routeMode,
+          label: routeLabel(routeMode, index),
+          distanceMeters,
+          estimatedDurationSeconds,
+          polyline: route.polyline.encodedPolyline,
+          highlights: [
+            routeMode === "loop" ? "google-routed loop structure" : "google-routed running line",
+            complexityBase <= 8 ? "lower turn complexity" : "more detailed urban routing"
+          ],
+          durationFitScore: Number(durationFitScore.toFixed(2)),
+          routeComplexityScore: Number(Math.min(1, complexityBase / 20).toFixed(2)),
+          startLatitude: start.latitude,
+          startLongitude: start.longitude,
+          endLatitude: endPoint.latitude,
+          endLongitude: endPoint.longitude,
+          apiSource: "routes_api",
+          navigationPayload: {
+            routeToken,
+            legs: legSteps(route)
+          }
+        } satisfies RouteCandidate;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.warn("routes.candidate.discarded", {
+          routeMode,
+          candidateIndex: index,
+          bearing,
+          origin: start,
+          destination,
+          intermediateCount: intermediates.length,
+          reason
+        });
+        throw error;
+      }
     });
 
     const settled = await Promise.allSettled(routePromises);
@@ -243,9 +270,14 @@ export class GoogleRoutesProvider {
       logger.error("routes.generate.failed", {
         routeMode,
         desiredCount,
+        targetCount,
+        start,
         failures
       });
-      throw new Error("Google Routes API failed to produce a valid real route candidate.");
+      throw new NoRouteCandidatesError(
+        "Google Routes API failed to produce a valid real route candidate.",
+        failures
+      );
     }
 
     return fulfilled.slice(0, targetCount);

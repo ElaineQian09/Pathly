@@ -1,8 +1,4 @@
-export class HttpError extends Error {
-  constructor(message: string, readonly status?: number) {
-    super(message);
-  }
-}
+import { HttpError } from "../errors.js";
 
 export const requireOk = async (response: Response, label: string) => {
   if (response.ok) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { z } from "zod";
+import { NoRouteCandidatesError } from "../errors.js";
 import { logger } from "../logger.js";
 import {
   createSessionRequestSchema,
@@ -126,6 +127,23 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
         throw error;
       }
     } catch (error) {
+      if (error instanceof NoRouteCandidatesError) {
+        logger.warn("http.routes_generate.no_result", {
+          routeMode: parsed.data.routeMode,
+          desiredCount: parsed.data.desiredCount,
+          failures: error.failures
+        });
+        response.json({
+          requestId: `routes_req_${randomUUID()}`,
+          candidates: [],
+          noResult: {
+            code: "google_routes_no_result",
+            message: error.message,
+            failures: error.failures
+          }
+        });
+        return;
+      }
       const details = getErrorDetails(error);
       logger.error("http.routes_generate.error", {
         routeMode: parsed.data.routeMode,
