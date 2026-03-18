@@ -21,8 +21,7 @@ type ComputeRoutesResponse = {
       steps?: Array<{
         distanceMeters?: number;
         staticDuration?: string;
-        navigationInstruction?: { instructions?: string };
-        maneuver?: string;
+        navigationInstruction?: { instructions?: string; maneuver?: string };
       }>;
     }>;
   }>;
@@ -75,7 +74,7 @@ const legSteps = (route: NonNullable<ComputeRoutesResponse["routes"]>[number]) =
       instruction: step.navigationInstruction?.instructions ?? "Continue on the route",
       distanceMeters: step.distanceMeters ?? 0,
       durationSeconds: parseDurationSeconds(step.staticDuration),
-      maneuver: step.maneuver ?? "continue"
+      maneuver: step.navigationInstruction?.maneuver ?? "continue"
     }))
   }));
 
@@ -102,7 +101,7 @@ export class GoogleRoutesProvider {
       routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
       fieldMask:
         options?.fieldMask ??
-        "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.maneuver",
+        "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver",
       apiKeyFingerprint: fingerprintSecret(this.apiKey),
       origin,
       destination,
@@ -115,7 +114,7 @@ export class GoogleRoutesProvider {
         "x-goog-api-key": this.apiKey ?? "",
         "x-goog-fieldmask":
           options?.fieldMask ??
-          "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.maneuver"
+          "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver"
       },
       body: JSON.stringify({
         origin: {
