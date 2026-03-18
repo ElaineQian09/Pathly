@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPathlyServer } from "../src/index.js";
 import { MockGeminiAdapter } from "../src/adapters/gemini-adapter.js";
 import { GoogleRoutesProvider } from "../src/adapters/google-routes-provider.js";
@@ -105,6 +105,261 @@ describe("Pathly backend", () => {
         longitude: -87.6278
       })
     ).rejects.toThrow("Google Routes API key is missing");
+  });
+
+  it("omits routingPreference on WALK route requests", async () => {
+    const responses = [
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1000,
+              duration: "600s",
+              polyline: { encodedPolyline: "abc123" },
+              legs: [
+                {
+                  distanceMeters: 1000,
+                  duration: "600s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_123",
+              distanceMeters: 1000,
+              duration: "600s",
+              polyline: { encodedPolyline: "abc123" }
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1100,
+              duration: "620s",
+              polyline: { encodedPolyline: "def456" },
+              legs: [
+                {
+                  distanceMeters: 1100,
+                  duration: "620s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_456",
+              distanceMeters: 1100,
+              duration: "620s",
+              polyline: { encodedPolyline: "def456" }
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1200,
+              duration: "640s",
+              polyline: { encodedPolyline: "ghi789" },
+              legs: [
+                {
+                  distanceMeters: 1200,
+                  duration: "640s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_789",
+              distanceMeters: 1200,
+              duration: "640s",
+              polyline: { encodedPolyline: "ghi789" }
+            }
+          ]
+        })
+      }
+    ];
+
+    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      await provider.generateCandidates("loop", 45, 3, {
+        latitude: 41.8819,
+        longitude: -87.6278
+      });
+
+      const firstCallBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as {
+        travelMode?: string;
+        routingPreference?: string;
+      };
+      expect(firstCallBody.travelMode).toBe("WALK");
+      expect(firstCallBody).not.toHaveProperty("routingPreference");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("requests routeToken with the documented DRIVE traffic-aware field mask", async () => {
+    const responses = [
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1000,
+              duration: "600s",
+              polyline: { encodedPolyline: "abc123" },
+              legs: [
+                {
+                  distanceMeters: 1000,
+                  duration: "600s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_123",
+              distanceMeters: 1000,
+              duration: "600s",
+              polyline: { encodedPolyline: "abc123" }
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1100,
+              duration: "620s",
+              polyline: { encodedPolyline: "def456" },
+              legs: [
+                {
+                  distanceMeters: 1100,
+                  duration: "620s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_456",
+              distanceMeters: 1100,
+              duration: "620s",
+              polyline: { encodedPolyline: "def456" }
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1200,
+              duration: "640s",
+              polyline: { encodedPolyline: "ghi789" },
+              legs: [
+                {
+                  distanceMeters: 1200,
+                  duration: "640s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              routeToken: "token_789",
+              distanceMeters: 1200,
+              duration: "640s",
+              polyline: { encodedPolyline: "ghi789" }
+            }
+          ]
+        })
+      }
+    ];
+
+    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      await provider.generateCandidates("loop", 45, 3, {
+        latitude: 41.8819,
+        longitude: -87.6278
+      });
+
+      const routeTokenCall = fetchMock.mock.calls.find((call) => {
+        const body = JSON.parse(String(call[1]?.body ?? "{}")) as { travelMode?: string };
+        return body.travelMode === "DRIVE";
+      });
+      const routeTokenHeaders = routeTokenCall?.[1]?.headers as Record<string, string>;
+      const routeTokenBody = JSON.parse(String(routeTokenCall?.[1]?.body ?? "{}")) as {
+        travelMode?: string;
+        routingPreference?: string;
+        polylineEncoding?: string;
+        polylineQuality?: string;
+      };
+
+      expect(routeTokenHeaders["x-goog-fieldmask"]).toBe(
+        "routes.routeToken,routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
+      );
+      expect(routeTokenBody.travelMode).toBe("DRIVE");
+      expect(routeTokenBody.routingPreference).toBe("TRAFFIC_AWARE");
+      expect(routeTokenBody.polylineEncoding).toBe("ENCODED_POLYLINE");
+      expect(routeTokenBody.polylineQuality).toBe("OVERVIEW");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("creates a session and handles join, preferences, planning, playback, and interrupts", async () => {

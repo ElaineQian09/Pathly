@@ -27,6 +27,12 @@ type ComputeRoutesResponse = {
   }>;
 };
 
+const BASE_ROUTE_FIELD_MASK =
+  "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver";
+
+const ROUTE_TOKEN_FIELD_MASK =
+  "routes.routeToken,routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline";
+
 const parseDurationSeconds = (value: string | undefined): number => {
   if (!value) {
     return 0;
@@ -95,13 +101,13 @@ export class GoogleRoutesProvider {
       fieldMask?: string;
     }
   ): Promise<ComputeRoutesResponse> {
+    const fieldMask = options?.fieldMask ?? BASE_ROUTE_FIELD_MASK;
+    const requestsPolyline = fieldMask.includes("routes.polyline");
     logger.info("routes.compute.request", {
       requestKind: options?.requestKind ?? "base_route",
       travelMode: options?.travelMode ?? "WALK",
       routingPreference: options?.routingPreference ?? null,
-      fieldMask:
-        options?.fieldMask ??
-        "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver",
+      fieldMask,
       apiKeyFingerprint: fingerprintSecret(this.apiKey),
       origin,
       destination,
@@ -112,9 +118,7 @@ export class GoogleRoutesProvider {
       headers: {
         "content-type": "application/json",
         "x-goog-api-key": this.apiKey ?? "",
-        "x-goog-fieldmask":
-          options?.fieldMask ??
-          "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver"
+        "x-goog-fieldmask": fieldMask
       },
       body: JSON.stringify({
         origin: {
@@ -134,11 +138,15 @@ export class GoogleRoutesProvider {
         })),
         travelMode: options?.travelMode ?? "WALK",
         computeAlternativeRoutes: false,
-        polylineEncoding: "ENCODED_POLYLINE",
-        polylineQuality: "OVERVIEW",
         languageCode: "en-US",
         units: "METRIC",
-        ...(options?.routingPreference ? { routingPreference: options.routingPreference } : {})
+        ...(options?.routingPreference ? { routingPreference: options.routingPreference } : {}),
+        ...(requestsPolyline
+          ? {
+              polylineEncoding: "ENCODED_POLYLINE",
+              polylineQuality: "OVERVIEW"
+            }
+          : {})
       })
     });
 
@@ -184,7 +192,7 @@ export class GoogleRoutesProvider {
         requestKind: "route_token",
         travelMode: "DRIVE",
         routingPreference: "TRAFFIC_AWARE",
-        fieldMask: "routes.routeToken"
+        fieldMask: ROUTE_TOKEN_FIELD_MASK
       });
       const routeToken = tokenResponse.routes?.[0]?.routeToken ?? null;
       if (!routeToken) {
