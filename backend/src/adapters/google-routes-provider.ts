@@ -1,5 +1,5 @@
 import { NoRouteCandidatesError } from "../errors.js";
-import { logger } from "../logger.js";
+import { fingerprintSecret, logger } from "../logger.js";
 import { requireOk } from "./http.js";
 import { MockRoutesProvider } from "./routes-provider.js";
 import type { RouteCandidate, RouteMode } from "../models/types.js";
@@ -90,17 +90,20 @@ export class GoogleRoutesProvider {
     destination: LatLng,
     intermediates: LatLng[] = [],
     options?: {
+      requestKind?: "base_route" | "route_token";
       travelMode?: "WALK" | "DRIVE" | "TWO_WHEELER";
       routingPreference?: "TRAFFIC_UNAWARE" | "TRAFFIC_AWARE" | "TRAFFIC_AWARE_OPTIMAL";
       fieldMask?: string;
     }
   ): Promise<ComputeRoutesResponse> {
     logger.info("routes.compute.request", {
+      requestKind: options?.requestKind ?? "base_route",
       travelMode: options?.travelMode ?? "WALK",
       routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
       fieldMask:
         options?.fieldMask ??
         "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.maneuver",
+      apiKeyFingerprint: fingerprintSecret(this.apiKey),
       origin,
       destination,
       intermediateCount: intermediates.length
@@ -143,6 +146,7 @@ export class GoogleRoutesProvider {
     await requireOk(response, "Google Routes API");
     const body = (await response.json()) as ComputeRoutesResponse;
     logger.info("routes.compute.response", {
+      requestKind: options?.requestKind ?? "base_route",
       routeCount: body.routes?.length ?? 0,
       hasPolyline: Boolean(body.routes?.[0]?.polyline?.encodedPolyline),
       hasLegs: Boolean(body.routes?.[0]?.legs?.length),
@@ -154,6 +158,7 @@ export class GoogleRoutesProvider {
   private async computeRouteToken(origin: LatLng, destination: LatLng, intermediates: LatLng[]): Promise<string | null> {
     try {
       const tokenResponse = await this.computeRoute(origin, destination, intermediates, {
+        requestKind: "route_token",
         travelMode: "DRIVE",
         routingPreference: "TRAFFIC_AWARE",
         fieldMask: "routes.routeToken"
@@ -161,12 +166,15 @@ export class GoogleRoutesProvider {
       const routeToken = tokenResponse.routes?.[0]?.routeToken ?? null;
       if (!routeToken) {
         logger.warn("routes.route_token.unavailable", {
+          requestKind: "route_token",
           reason: "missing_in_response"
         });
       }
       return routeToken;
     } catch (error) {
       logger.warn("routes.route_token.error", {
+        requestKind: "route_token",
+        apiKeyFingerprint: fingerprintSecret(this.apiKey),
         message: error instanceof Error ? error.message : "Unknown route token error"
       });
       return null;

@@ -2,6 +2,18 @@ type LogLevel = "INFO" | "WARN" | "ERROR";
 
 type LogFields = Record<string, unknown>;
 
+export const fingerprintSecret = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value.length <= 10) {
+    return `${value.slice(0, 2)}***${value.slice(-2)}`;
+  }
+
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+};
+
 const writeLog = (level: LogLevel, event: string, fields: LogFields = {}) => {
   const payload = {
     ts: new Date().toISOString(),

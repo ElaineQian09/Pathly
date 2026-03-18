@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { buildApp } from "./http/app.js";
-import { logger } from "./logger.js";
+import { fingerprintSecret, logger } from "./logger.js";
 import { createServices } from "./services/container.js";
 import { attachLiveServer } from "./ws/live-server.js";
 
@@ -45,11 +45,12 @@ const runningUnderVitest = process.argv.some((argument) => argument.includes("vi
 
 if (process.env.NODE_ENV !== "test" && !process.env.VITEST && !runningUnderVitest) {
   const port = Number(process.env.PORT ?? 3000);
-  const { server } = createPathlyServer();
+  const { server, config } = createPathlyServer();
   server.listen(port, () => {
     logger.info("server.started", {
       product: "Pathly",
-      port
+      port,
+      googleApiKeyFingerprint: fingerprintSecret(config.googleApiKey)
     });
   });
 }
