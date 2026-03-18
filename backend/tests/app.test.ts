@@ -217,7 +217,8 @@ describe("Pathly backend", () => {
         longitude: -87.6278
       });
 
-      const firstCallBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as {
+      const calls = fetchMock.mock.calls as unknown as Array<[unknown, { body?: string }?]>;
+      const firstCallBody = JSON.parse(String(calls[0]?.[1]?.body ?? "{}")) as {
         travelMode?: string;
         routingPreference?: string;
       };
@@ -338,7 +339,10 @@ describe("Pathly backend", () => {
         longitude: -87.6278
       });
 
-      const routeTokenCall = fetchMock.mock.calls.find((call) => {
+      const calls = fetchMock.mock.calls as unknown as Array<
+        [unknown, { headers?: Record<string, string>; body?: string }?]
+      >;
+      const routeTokenCall = calls.find((call) => {
         const body = JSON.parse(String(call[1]?.body ?? "{}")) as { travelMode?: string };
         return body.travelMode === "DRIVE";
       });
