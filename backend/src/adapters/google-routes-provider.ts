@@ -1,4 +1,4 @@
-import { NoRouteCandidatesError } from "../errors.js";
+import { HttpError, NoRouteCandidatesError } from "../errors.js";
 import { fingerprintSecret, logger } from "../logger.js";
 import { requireOk } from "./http.js";
 import { MockRoutesProvider } from "./routes-provider.js";
@@ -155,6 +155,30 @@ export class GoogleRoutesProvider {
     return body;
   }
 
+  private logGoogleRouteError(
+    event: "routes.candidate.discarded" | "routes.route_token.error",
+    fields: Record<string, unknown>,
+    error: unknown
+  ) {
+    if (error instanceof HttpError) {
+      logger.warn(event, {
+        ...fields,
+        reason: error.message,
+        httpStatus: error.status,
+        googleStatus: error.providerError?.status,
+        googleMessage: error.providerError?.message,
+        googleDetails: error.providerError?.details,
+        googleRawBody: error.providerError?.rawBody
+      });
+      return;
+    }
+
+    logger.warn(event, {
+      ...fields,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   private async computeRouteToken(origin: LatLng, destination: LatLng, intermediates: LatLng[]): Promise<string | null> {
     try {
       const tokenResponse = await this.computeRoute(origin, destination, intermediates, {
@@ -172,11 +196,14 @@ export class GoogleRoutesProvider {
       }
       return routeToken;
     } catch (error) {
-      logger.warn("routes.route_token.error", {
-        requestKind: "route_token",
-        apiKeyFingerprint: fingerprintSecret(this.apiKey),
-        message: error instanceof Error ? error.message : "Unknown route token error"
-      });
+      this.logGoogleRouteError(
+        "routes.route_token.error",
+        {
+          requestKind: "route_token",
+          apiKeyFingerprint: fingerprintSecret(this.apiKey)
+        },
+        error
+      );
       return null;
     }
   }
@@ -251,16 +278,18 @@ export class GoogleRoutesProvider {
           }
         } satisfies RouteCandidate;
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        logger.warn("routes.candidate.discarded", {
-          routeMode,
-          candidateIndex: index,
-          bearing,
-          origin: start,
-          destination,
-          intermediateCount: intermediates.length,
-          reason
-        });
+        this.logGoogleRouteError(
+          "routes.candidate.discarded",
+          {
+            routeMode,
+            candidateIndex: index,
+            bearing,
+            origin: start,
+            destination,
+            intermediateCount: intermediates.length
+          },
+          error
+        );
         throw error;
       }
     });
