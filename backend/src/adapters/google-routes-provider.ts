@@ -98,7 +98,7 @@ export class GoogleRoutesProvider {
     logger.info("routes.compute.request", {
       requestKind: options?.requestKind ?? "base_route",
       travelMode: options?.travelMode ?? "WALK",
-      routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
+      routingPreference: options?.routingPreference ?? null,
       fieldMask:
         options?.fieldMask ??
         "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver",
@@ -133,12 +133,12 @@ export class GoogleRoutesProvider {
           }
         })),
         travelMode: options?.travelMode ?? "WALK",
-        routingPreference: options?.routingPreference ?? "TRAFFIC_UNAWARE",
         computeAlternativeRoutes: false,
         polylineEncoding: "ENCODED_POLYLINE",
         polylineQuality: "OVERVIEW",
         languageCode: "en-US",
-        units: "METRIC"
+        units: "METRIC",
+        ...(options?.routingPreference ? { routingPreference: options.routingPreference } : {})
       })
     });
 
