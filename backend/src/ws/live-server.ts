@@ -100,8 +100,14 @@ const sendSegmentWithAudio = (
 };
 
 export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, raw: string) => {
+  let stage = "message.parse";
+  let messageType = "unknown";
+  let sessionIdForLog: string | null = null;
+
   try {
     const message = parseJson(raw);
+    messageType = message.type;
+    stage = "message.session_lookup";
     const payload = message.payload ?? {};
     const requestedSessionId = String(payload.sessionId ?? "");
     const resumeToken = typeof payload.resumeToken === "string" ? payload.resumeToken : null;
@@ -119,6 +125,8 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
     }
 
     const sessionId = session.sessionId;
+    sessionIdForLog = sessionId;
+    stage = `message.dispatch.${message.type}`;
     logger.info("ws.message.received", {
       type: message.type,
       sessionId
@@ -146,19 +154,94 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         break;
       }
       case "context.snapshot": {
+        stage = "context.snapshot.validate";
         const parsed = contextSnapshotSchema.safeParse(payload);
         if (!parsed.success) {
           throw new Error("Invalid context.snapshot payload");
         }
+        logger.info("ws.context.snapshot.received", {
+          sessionId,
+          elapsedSeconds: parsed.data.motion.elapsedSeconds,
+          offRoute: parsed.data.nav.offRoute,
+          approachingManeuver: parsed.data.nav.approachingManeuver,
+          quietModeEnabled: session.preferences.quietModeEnabled,
+          quietModeUntil: session.preferences.quietModeUntil
+        });
+        stage = "context.snapshot.persist_snapshot";
         session.latestSnapshot = parsed.data;
         deps.sessionService.save(session);
+        stage = "context.snapshot.create_checkpoint";
         const checkpoint = deps.checkpointService.createCheckpoint(session);
+        logger.info("ws.checkpoint.created", {
+          sessionId,
+          checkpointCount: session.checkpoints.length,
+          resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`
+        });
+        stage = "context.snapshot.create_plan";
         const plan = deps.routerService.createPlan(session, parsed.data);
         if (plan) {
+          logger.info("ws.turn.plan.created", {
+            sessionId,
+            turnId: plan.turnId,
+            speaker: plan.speaker,
+            reason: plan.reason,
+            buckets: plan.contentBuckets,
+            targetDurationSeconds: plan.targetDurationSeconds
+          });
           deps.sessionService.save(session);
+          stage = "context.snapshot.fetch_places";
+          const placesStartedAt = Date.now();
+          logger.info("ws.places.fetch.start", {
+            sessionId,
+            turnId: plan.turnId,
+            routeId: session.routeSelection.selectedRouteId
+          });
           const places = await deps.placeService.getCandidates(parsed.data, session.routeSelection);
+          logger.info("ws.places.fetch.done", {
+            sessionId,
+            turnId: plan.turnId,
+            placeCount: places.length,
+            durationMs: Date.now() - placesStartedAt
+          });
+          stage = "context.snapshot.fetch_news";
+          const newsStartedAt = Date.now();
+          logger.info("ws.news.fetch.start", {
+            sessionId,
+            turnId: plan.turnId,
+            categories: session.preferences.newsCategories
+          });
           const news = await deps.newsService.getCandidates(session.preferences);
+          logger.info("ws.news.fetch.done", {
+            sessionId,
+            turnId: plan.turnId,
+            newsCount: news.length,
+            durationMs: Date.now() - newsStartedAt
+          });
+          logger.info("ws.turn.composition.started", {
+            sessionId,
+            turnId: plan.turnId,
+            placeCount: places.length,
+            newsCount: news.length,
+            buckets: plan.contentBuckets
+          });
+          stage = "context.snapshot.compose_playback";
+          const playbackStartedAt = Date.now();
+          logger.info("ws.gemini.playback.start", {
+            sessionId,
+            turnId: plan.turnId,
+            speaker: plan.speaker,
+            buckets: plan.contentBuckets,
+            placeCount: places.length,
+            newsCount: news.length
+          });
           const segment = await deps.geminiAdapter.composePlayback(plan, session, places, news);
+          logger.info("ws.gemini.playback.done", {
+            sessionId,
+            turnId: plan.turnId,
+            durationMs: Date.now() - playbackStartedAt,
+            chunkCount: segment.audioChunks.length,
+            transcriptLength: segment.transcriptPreview.length
+          });
           logger.info("ws.turn.generated", {
             sessionId,
             turnId: plan.turnId,
@@ -166,10 +249,26 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
             reason: plan.reason,
             buckets: plan.contentBuckets
           });
+          stage = "context.snapshot.emit_turn";
+          logger.info("ws.turn.emit.start", {
+            sessionId,
+            turnId: plan.turnId,
+            eventType: "playback.segment"
+          });
           socket.send(JSON.stringify({ type: "turn.plan", payload: plan }));
           sendSegmentWithAudio(socket, sessionId, "playback.segment", segment);
+        } else {
+          logger.info("ws.turn.skipped", {
+            sessionId,
+            reason: "router_returned_null",
+            quietModeEnabled: session.preferences.quietModeEnabled,
+            quietModeUntil: session.preferences.quietModeUntil,
+            offRoute: parsed.data.nav.offRoute,
+            approachingManeuver: parsed.data.nav.approachingManeuver
+          });
         }
 
+        stage = "context.snapshot.reconnect_check";
         if (!session.reconnectIssued && parsed.data.motion.elapsedSeconds >= 1800) {
           session.reconnectIssued = true;
           deps.sessionService.setStatus(sessionId, "reconnecting");
@@ -188,6 +287,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
             }
           }));
         }
+        stage = "done";
         break;
       }
       case "quick_action": {
@@ -338,6 +438,9 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
     }
   } catch (error) {
     logger.error("ws.message.error", {
+      type: messageType,
+      sessionId: sessionIdForLog,
+      stage,
       message: error instanceof Error ? error.message : "Invalid websocket message"
     });
     socket.send(JSON.stringify({

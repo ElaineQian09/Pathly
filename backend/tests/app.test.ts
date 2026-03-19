@@ -39,6 +39,7 @@ describe("Pathly backend", () => {
     process.env.VITEST = "1";
     delete process.env.PATHLY_DATA_DIR;
     delete process.env.PATHLY_BASE_URL;
+    vi.restoreAllMocks();
     if (dataDir) {
       fs.rmSync(dataDir, { recursive: true, force: true });
       dataDir = "";
@@ -371,6 +372,8 @@ describe("Pathly backend", () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pathly-test-"));
     process.env.PATHLY_DATA_DIR = dataDir;
     process.env.PATHLY_BASE_URL = "http://localhost:3000";
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const store = new FileStore(dataDir);
     createPathlyServer();
     const sessionService = new SessionService(store);
@@ -544,6 +547,34 @@ describe("Pathly backend", () => {
     expect(firstChunkBuffer.subarray(0, 3).toString("ascii")).not.toBe("ID3");
     expect(playbackTurnChunks.length).toBeGreaterThan(0);
     expect(playbackSegmentPayload?.estimatedPlaybackMs).toBe(actualPlaybackMs);
+
+    const loggedEvents = logSpy.mock.calls.flatMap(([line]) => {
+      if (typeof line !== "string") {
+        return [];
+      }
+
+      try {
+        return [JSON.parse(line).event as string];
+      } catch {
+        return [];
+      }
+    });
+    const stagedEvents = [
+      "ws.context.snapshot.received",
+      "ws.turn.plan.created",
+      "ws.places.fetch.start",
+      "ws.places.fetch.done",
+      "ws.news.fetch.done",
+      "ws.gemini.playback.start",
+      "ws.gemini.playback.done",
+      "ws.turn.emit.start"
+    ];
+
+    expect(loggedEvents).toEqual(expect.arrayContaining(stagedEvents));
+
+    const stagedIndexes = stagedEvents.map((event) => loggedEvents.indexOf(event));
+    expect(stagedIndexes.every((index) => index >= 0)).toBe(true);
+    expect(stagedIndexes).toEqual([...stagedIndexes].sort((left, right) => left - right));
 
     const reloadedStore = new FileStore(dataDir);
     const restoredSessionService = new SessionService(reloadedStore);
