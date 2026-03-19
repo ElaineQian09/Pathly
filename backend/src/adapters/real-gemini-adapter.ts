@@ -100,6 +100,10 @@ export class RealGeminiAdapter {
     userPrompt: string
   ): Promise<GeneratedAudioMessage<T> | null> {
     if (!this.apiKey) {
+      logger.warn("gemini.live.unavailable", {
+        turnId: metadata.turnId,
+        reason: "missing_api_key"
+      });
       return null;
     }
 
@@ -110,6 +114,8 @@ export class RealGeminiAdapter {
       let audioMimeType: string | null = null;
       let completed = false;
       let setupAcknowledged = false;
+      let messageCount = 0;
+      let audioPartCount = 0;
 
       const timeout = setTimeout(() => {
         socket.close();
@@ -129,6 +135,12 @@ export class RealGeminiAdapter {
           }
           const rawAudio = Buffer.concat(audioParts);
           const parsedFormat = parseLiveAudioMimeType(audioMimeType);
+          logger.info("gemini.live.turn.completed", {
+            turnId: metadata.turnId,
+            messageCount,
+            audioPartCount,
+            transcriptLength: (transcript || metadata.transcriptPreview).length
+          });
           logger.info("gemini.live.audio.received", {
             turnId: metadata.turnId,
             mimeType: audioMimeType ?? "audio/pcm;rate=24000",
@@ -155,6 +167,11 @@ export class RealGeminiAdapter {
       };
 
       socket.on("open", () => {
+        logger.info("gemini.live.socket.open", {
+          turnId: metadata.turnId,
+          model: this.liveModel,
+          voice: this.liveVoice
+        });
         socket.send(
           JSON.stringify({
             setup: {
@@ -180,6 +197,7 @@ export class RealGeminiAdapter {
 
       socket.on("message", (raw) => {
         try {
+          messageCount += 1;
           const message = JSON.parse(raw.toString()) as LiveServerMessage;
           if (message.error?.message) {
             throw new Error(message.error.message);
@@ -187,6 +205,9 @@ export class RealGeminiAdapter {
 
           if (message.setupComplete && !setupAcknowledged) {
             setupAcknowledged = true;
+            logger.info("gemini.live.setup.complete", {
+              turnId: metadata.turnId
+            });
             socket.send(
               JSON.stringify({
                 clientContent: {
@@ -200,6 +221,11 @@ export class RealGeminiAdapter {
                 }
               })
             );
+            logger.info("gemini.live.prompt.sent", {
+              turnId: metadata.turnId,
+              promptLength: userPrompt.length,
+              systemInstructionLength: systemInstruction.length
+            });
             return;
           }
 
@@ -220,6 +246,7 @@ export class RealGeminiAdapter {
             if (part.inlineData?.data) {
               audioParts.push(Buffer.from(part.inlineData.data, "base64"));
               audioMimeType = part.inlineData.mimeType ?? audioMimeType;
+              audioPartCount += 1;
             }
             transcript = updateTranscript(transcript, part.text);
           }
@@ -240,10 +267,18 @@ export class RealGeminiAdapter {
 
       socket.on("error", (error) => {
         clearTimeout(timeout);
+        logger.warn("gemini.live.socket.error", {
+          turnId: metadata.turnId,
+          message: error.message
+        });
         reject(error);
       });
 
       socket.on("close", () => {
+        logger.info("gemini.live.socket.closed", {
+          turnId: metadata.turnId,
+          completed
+        });
         if (!completed) {
           clearTimeout(timeout);
         }
@@ -267,12 +302,25 @@ export class RealGeminiAdapter {
     };
 
     try {
+      logger.info("gemini.live.playback.start", {
+        turnId: plan.turnId,
+        speaker: plan.speaker,
+        buckets: plan.contentBuckets,
+        placeCount: places.length,
+        newsCount: news.length
+      });
       const message = await this.synthesizeLiveAudio(
         metadata,
         "Speak as one Pathly host. Keep the response concise, natural, English-first, and suitable for a live running show.",
         buildPlaybackPrompt(plan, session, places, news)
       );
       if (message) {
+        logger.info("gemini.live.playback.success", {
+          turnId: plan.turnId,
+          speaker: plan.speaker,
+          chunkCount: message.audioChunks.length,
+          transcriptLength: message.transcriptPreview.length
+        });
         return message;
       }
     } catch (error) {
@@ -282,6 +330,10 @@ export class RealGeminiAdapter {
       });
     }
 
+    logger.warn("gemini.live.playback.fallback", {
+      turnId: plan.turnId,
+      speaker: plan.speaker
+    });
     return this.fallback.composePlayback(plan, session, places, news);
   }
 
@@ -301,12 +353,22 @@ export class RealGeminiAdapter {
     };
 
     try {
+      logger.info("gemini.live.interrupt.start", {
+        turnId,
+        intent
+      });
       const message = await this.synthesizeLiveAudio(
         metadata,
         "Speak as one Pathly host. Answer the interruption directly first, in English, then stop cleanly.",
         buildInterruptPrompt(session, intent, transcriptPreview)
       );
       if (message) {
+        logger.info("gemini.live.interrupt.success", {
+          turnId,
+          intent,
+          chunkCount: message.audioChunks.length,
+          transcriptLength: message.transcriptPreview.length
+        });
         return message;
       }
     } catch (error) {
@@ -316,6 +378,10 @@ export class RealGeminiAdapter {
       });
     }
 
+    logger.warn("gemini.live.interrupt.fallback", {
+      turnId,
+      intent
+    });
     return this.fallback.composeInterruptResult(session, intent, transcriptPreview);
   }
 }

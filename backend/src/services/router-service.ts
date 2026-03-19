@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { logger } from "../logger.js";
 import type {
   ContentBucket,
   ContextSnapshot,
@@ -21,6 +22,14 @@ export class RouterService {
       (quietUntil === null || quietUntil > Date.now());
 
     if (quietActive && !snapshot.nav.approachingManeuver && !snapshot.nav.offRoute) {
+      logger.info("router.plan.suppressed", {
+        sessionId: session.sessionId,
+        reason: "quiet_mode",
+        quietModeEnabled: session.preferences.quietModeEnabled,
+        quietModeUntil: session.preferences.quietModeUntil,
+        approachingManeuver: snapshot.nav.approachingManeuver,
+        offRoute: snapshot.nav.offRoute
+      });
       session.lastTurnAt = now;
       return null;
     }
@@ -83,7 +92,7 @@ export class RouterService {
     const targetDurationSeconds =
       session.preferences.talkDensity === "low" ? 10 : session.preferences.talkDensity === "high" ? 26 : 18;
 
-    return {
+    const plan: TurnPlan = {
       turnId: `turn_${randomUUID()}`,
       speaker: session.currentSpeaker,
       segmentType: "main_turn",
@@ -92,6 +101,22 @@ export class RouterService {
       reason,
       safeInterruptAfterMs: 4000
     };
+
+    logger.info("router.plan.created", {
+      sessionId: session.sessionId,
+      turnId: plan.turnId,
+      speaker: plan.speaker,
+      reason: plan.reason,
+      buckets: plan.contentBuckets,
+      targetDurationSeconds: plan.targetDurationSeconds,
+      talkDensity: session.preferences.talkDensity,
+      offRoute: snapshot.nav.offRoute,
+      approachingManeuver: snapshot.nav.approachingManeuver,
+      currentSpeedMetersPerSecond: snapshot.motion.currentSpeedMetersPerSecond,
+      elapsedSeconds: snapshot.motion.elapsedSeconds
+    });
+
+    return plan;
   }
 
   applyQuickAction(session: RunSession, action: string): void {
