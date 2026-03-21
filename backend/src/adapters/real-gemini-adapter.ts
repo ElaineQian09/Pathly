@@ -200,6 +200,11 @@ export class RealGeminiAdapter {
           messageCount += 1;
           const message = JSON.parse(raw.toString()) as LiveServerMessage;
           if (message.error?.message) {
+            logger.error("gemini.live.server.error", {
+              turnId: metadata.turnId,
+              model: this.liveModel,
+              message: message.error.message
+            });
             throw new Error(message.error.message);
           }
 
@@ -269,14 +274,18 @@ export class RealGeminiAdapter {
         clearTimeout(timeout);
         logger.warn("gemini.live.socket.error", {
           turnId: metadata.turnId,
-          message: error.message
+          model: this.liveModel,
+          message: error instanceof Error ? error.message : String(error)
         });
         reject(error);
       });
 
-      socket.on("close", () => {
+      socket.on("close", (code, reason) => {
         logger.info("gemini.live.socket.closed", {
           turnId: metadata.turnId,
+          model: this.liveModel,
+          code,
+          reason: reason.toString(),
           completed
         });
         if (!completed) {
