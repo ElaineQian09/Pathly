@@ -154,7 +154,7 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
     }
   });
 
-  app.post("/v1/sessions", (request, response) => {
+  app.post("/v1/sessions", async (request, response) => {
     const parsed = createSessionRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       logger.warn("http.sessions.invalid", {
@@ -167,7 +167,16 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       return;
     }
 
-    const session = sessionService.create(parsed.data);
+    const selectedCandidate = await routeService.prepareSelectedCandidate(
+      parsed.data.routeSelection.selectedCandidate
+    );
+    const session = sessionService.create({
+      ...parsed.data,
+      routeSelection: {
+        ...parsed.data.routeSelection,
+        selectedCandidate
+      }
+    });
     logger.info("http.sessions.created", {
       sessionId: session.sessionId,
       openingSpeaker: session.openingSpeaker,

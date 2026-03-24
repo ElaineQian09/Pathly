@@ -496,6 +496,81 @@ describe("Pathly backend", () => {
     }
   });
 
+  it("derives walking guidance from the selected candidate polyline during session creation", async () => {
+    const selectedCandidate = {
+      routeId: "route_loop_01",
+      routeMode: "loop" as const,
+      label: "Loop Candidate 1",
+      distanceMeters: 1000,
+      estimatedDurationSeconds: 600,
+      polyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+      highlights: ["lakefront stretch"],
+      durationFitScore: 0.91,
+      routeComplexityScore: 0.3,
+      startLatitude: 38.5,
+      startLongitude: -120.2,
+      endLatitude: 43.252,
+      endLongitude: -126.453,
+      apiSource: "routes_api",
+      navigationPayload: {
+        routeToken: null,
+        legs: []
+      }
+    };
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        routes: [
+          {
+            distanceMeters: 1050,
+            duration: "620s",
+            routeToken: null,
+            polyline: {
+              encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+            },
+            legs: [
+              {
+                distanceMeters: 1050,
+                duration: "620s",
+                steps: [
+                  {
+                    distanceMeters: 1050,
+                    staticDuration: "620s",
+                    navigationInstruction: {
+                      instructions: "Follow the selected route",
+                      maneuver: "continue"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      const refined = await provider.prepareSelectedCandidate(selectedCandidate);
+
+      const calls = fetchMock.mock.calls as unknown as Array<[unknown, { body?: string }?]>;
+      const requestBody = JSON.parse(String(calls[0]?.[1]?.body ?? "{}")) as {
+        travelMode?: string;
+        intermediates?: Array<{ location: { latLng: { latitude: number; longitude: number } } }>;
+      };
+
+      expect(requestBody.travelMode).toBe("WALK");
+      expect(requestBody.intermediates?.length).toBeGreaterThan(0);
+      expect(refined.navigationPayload.legs[0]?.steps[0]?.instruction).toBe(
+        "Follow the selected route"
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("creates a session and handles join, preferences, planning, playback, and interrupts", async () => {
     process.env.VITEST = "1";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pathly-test-"));

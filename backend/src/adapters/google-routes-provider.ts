@@ -9,6 +9,10 @@ type LatLng = {
   longitude: number;
 };
 
+type IndexedLatLng = LatLng & {
+  index: number;
+};
+
 type ComputeRoutesResponse = {
   routes?: Array<{
     distanceMeters?: number;
@@ -113,6 +117,189 @@ const legSteps = (route: NonNullable<ComputeRoutesResponse["routes"]>[number]) =
     }))
   }));
 
+const decodePolyline = (encoded: string): LatLng[] => {
+  const points: LatLng[] = [];
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index <= encoded.length);
+
+    const latitudeChange = result & 1 ? ~(result >> 1) : result >> 1;
+    latitude += latitudeChange;
+
+    result = 0;
+    shift = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index <= encoded.length);
+
+    const longitudeChange = result & 1 ? ~(result >> 1) : result >> 1;
+    longitude += longitudeChange;
+
+    points.push({
+      latitude: latitude / 1e5,
+      longitude: longitude / 1e5
+    });
+  }
+
+  return points;
+};
+
+const toLocalMeters = (origin: LatLng, point: LatLng) => {
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude = Math.cos((origin.latitude * Math.PI) / 180) * 111_320;
+  return {
+    x: (point.longitude - origin.longitude) * metersPerDegreeLongitude,
+    y: (point.latitude - origin.latitude) * metersPerDegreeLatitude
+  };
+};
+
+const squaredDistance = (left: { x: number; y: number }, right: { x: number; y: number }) => {
+  const dx = left.x - right.x;
+  const dy = left.y - right.y;
+  return dx * dx + dy * dy;
+};
+
+const distanceMetersBetween = (origin: LatLng, left: LatLng, right: LatLng) =>
+  Math.sqrt(squaredDistance(toLocalMeters(origin, left), toLocalMeters(origin, right)));
+
+const pointToSegmentDistanceMeters = (
+  origin: LatLng,
+  point: LatLng,
+  segmentStart: LatLng,
+  segmentEnd: LatLng
+) => {
+  const pointMeters = toLocalMeters(origin, point);
+  const startMeters = toLocalMeters(origin, segmentStart);
+  const endMeters = toLocalMeters(origin, segmentEnd);
+  const segmentLengthSquared = squaredDistance(startMeters, endMeters);
+
+  if (segmentLengthSquared === 0) {
+    return Math.sqrt(squaredDistance(pointMeters, startMeters));
+  }
+
+  const projection =
+    ((pointMeters.x - startMeters.x) * (endMeters.x - startMeters.x) +
+      (pointMeters.y - startMeters.y) * (endMeters.y - startMeters.y)) /
+    segmentLengthSquared;
+  const clamped = Math.max(0, Math.min(1, projection));
+  const projectedPoint = {
+    x: startMeters.x + clamped * (endMeters.x - startMeters.x),
+    y: startMeters.y + clamped * (endMeters.y - startMeters.y)
+  };
+
+  return Math.sqrt(squaredDistance(pointMeters, projectedPoint));
+};
+
+const maxLateralOffsetMeters = (sourcePoints: LatLng[], referencePoints: LatLng[]) => {
+  if (sourcePoints.length === 0 || referencePoints.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const origin = sourcePoints[0];
+  let maxOffset = 0;
+  for (const point of sourcePoints) {
+    let minOffset = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < referencePoints.length - 1; index += 1) {
+      const offset = pointToSegmentDistanceMeters(
+        origin,
+        point,
+        referencePoints[index],
+        referencePoints[index + 1]
+      );
+      minOffset = Math.min(minOffset, offset);
+    }
+    maxOffset = Math.max(maxOffset, minOffset);
+  }
+
+  return maxOffset;
+};
+
+const turnScoreAtPoint = (points: LatLng[], index: number) => {
+  if (index <= 0 || index >= points.length - 1) {
+    return 0;
+  }
+
+  const previous = points[index - 1];
+  const current = points[index];
+  const next = points[index + 1];
+  const incoming = {
+    x: current.longitude - previous.longitude,
+    y: current.latitude - previous.latitude
+  };
+  const outgoing = {
+    x: next.longitude - current.longitude,
+    y: next.latitude - current.latitude
+  };
+  const incomingMagnitude = Math.hypot(incoming.x, incoming.y);
+  const outgoingMagnitude = Math.hypot(outgoing.x, outgoing.y);
+
+  if (incomingMagnitude === 0 || outgoingMagnitude === 0) {
+    return 0;
+  }
+
+  const cosine =
+    (incoming.x * outgoing.x + incoming.y * outgoing.y) / (incomingMagnitude * outgoingMagnitude);
+
+  return Math.acos(Math.max(-1, Math.min(1, cosine)));
+};
+
+const extractGuidanceAnchors = (points: LatLng[], maxTurnCount: number): IndexedLatLng[] => {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const start = points[0];
+  const indexedPoints = points.map((point, index) => ({
+    ...point,
+    index
+  }));
+
+  const furthestPoint =
+    indexedPoints
+      .slice(1, -1)
+      .sort(
+        (left, right) =>
+          distanceMetersBetween(start, right, start) - distanceMetersBetween(start, left, start)
+      )[0] ?? indexedPoints[Math.floor(indexedPoints.length / 2)];
+
+  const turnPoints = indexedPoints
+    .slice(1, -1)
+    .map((point) => ({
+      ...point,
+      turnScore: turnScoreAtPoint(points, point.index)
+    }))
+    .sort((left, right) => right.turnScore - left.turnScore)
+    .slice(0, maxTurnCount);
+
+  const deduped = new Map<number, IndexedLatLng>();
+  for (const point of [indexedPoints[0], furthestPoint, ...turnPoints, indexedPoints[indexedPoints.length - 1]]) {
+    deduped.set(point.index, {
+      latitude: point.latitude,
+      longitude: point.longitude,
+      index: point.index
+    });
+  }
+
+  return Array.from(deduped.values()).sort((left, right) => left.index - right.index);
+};
+
+const isGuidanceSimilarEnough = (lengthDeltaRatio: number, maxOffset: number) =>
+  lengthDeltaRatio <= 0.1 && maxOffset <= 250;
+
 export class GoogleRoutesProvider {
   constructor(
     private readonly apiKey: string | null,
@@ -124,7 +311,7 @@ export class GoogleRoutesProvider {
     destination: LatLng,
     intermediates: LatLng[] = [],
     options?: {
-      requestKind?: "base_route";
+      requestKind?: "base_route" | "guided_route";
       travelMode?: "WALK" | "DRIVE" | "TWO_WHEELER";
       routingPreference?: "TRAFFIC_UNAWARE" | "TRAFFIC_AWARE" | "TRAFFIC_AWARE_OPTIMAL";
       fieldMask?: string;
@@ -213,6 +400,103 @@ export class GoogleRoutesProvider {
       ...fields,
       reason: error instanceof Error ? error.message : String(error)
     });
+  }
+
+  async prepareSelectedCandidate(candidate: RouteCandidate): Promise<RouteCandidate> {
+    if (!this.apiKey) {
+      return candidate;
+    }
+
+    let originalPoints: LatLng[];
+    try {
+      originalPoints = decodePolyline(candidate.polyline);
+    } catch (error) {
+      logger.warn("routes.guidance.decode_failed", {
+        routeId: candidate.routeId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return candidate;
+    }
+
+    if (originalPoints.length < 2) {
+      logger.warn("routes.guidance.insufficient_points", {
+        routeId: candidate.routeId,
+        polylinePointCount: originalPoints.length
+      });
+      return candidate;
+    }
+
+    const anchorPlans = [2, 4];
+    const start = originalPoints[0];
+    const finish = originalPoints[originalPoints.length - 1];
+
+    for (const maxTurnCount of anchorPlans) {
+      const anchors = extractGuidanceAnchors(originalPoints, maxTurnCount);
+      const intermediates = anchors.slice(1, -1).map(({ latitude, longitude }) => ({
+        latitude,
+        longitude
+      }));
+
+      logger.info("routes.guidance.anchors", {
+        routeId: candidate.routeId,
+        originalPolylinePointCount: originalPoints.length,
+        anchorCount: anchors.length,
+        anchors: anchors.map((anchor) => ({
+          index: anchor.index,
+          latitude: Number(anchor.latitude.toFixed(6)),
+          longitude: Number(anchor.longitude.toFixed(6))
+        }))
+      });
+
+      try {
+        const response = await this.computeRoute(start, finish, intermediates, {
+          requestKind: "guided_route",
+          travelMode: "WALK"
+        });
+        const route = response.routes?.[0];
+
+        if (!route?.polyline?.encodedPolyline) {
+          throw new Error("missing_guidance_polyline");
+        }
+
+        const guidancePoints = decodePolyline(route.polyline.encodedPolyline);
+        const guidanceDistanceMeters = route.distanceMeters ?? candidate.distanceMeters;
+        const lengthDeltaRatio = Math.abs(guidanceDistanceMeters - candidate.distanceMeters) / candidate.distanceMeters;
+        const maxOffset = maxLateralOffsetMeters(originalPoints, guidancePoints);
+
+        logger.info("routes.guidance.validation", {
+          routeId: candidate.routeId,
+          anchorCount: anchors.length,
+          guidanceDistanceMeters,
+          originalDistanceMeters: candidate.distanceMeters,
+          lengthDeltaRatio: Number(lengthDeltaRatio.toFixed(3)),
+          maxLateralOffsetMeters: Number(maxOffset.toFixed(1))
+        });
+
+        if (!isGuidanceSimilarEnough(lengthDeltaRatio, maxOffset)) {
+          continue;
+        }
+
+        return {
+          ...candidate,
+          navigationPayload: {
+            routeToken: route.routeToken ?? null,
+            legs: legSteps(route)
+          }
+        };
+      } catch (error) {
+        logger.warn("routes.guidance.failed", {
+          routeId: candidate.routeId,
+          anchorPlanTurnCount: maxTurnCount,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    logger.warn("routes.guidance.fallback_original", {
+      routeId: candidate.routeId
+    });
+    return candidate;
   }
 
   async generateCandidates(
