@@ -44,6 +44,31 @@ const isDurationWithinTolerance = (
   estimatedDurationSeconds >= requestedDurationSeconds * 0.6 &&
   estimatedDurationSeconds <= requestedDurationSeconds * 1.6;
 
+const LOOP_ATTEMPT_SCALES = [1, 0.72, 0.52];
+
+const parseDurationOutOfRangeReason = (reason: string) => {
+  if (!reason.startsWith("duration_out_of_range:")) {
+    return null;
+  }
+  const [, estimatedDurationSeconds, requestedDurationSeconds] = reason.split(":");
+  return {
+    estimatedDurationSeconds: Number(estimatedDurationSeconds),
+    requestedDurationSeconds: Number(requestedDurationSeconds)
+  };
+};
+
+const shouldRetryLoopWithSmallerRadius = (failures: string[]) =>
+  failures.length > 0 &&
+  failures.every((failure) => {
+    const parsed = parseDurationOutOfRangeReason(failure);
+    return (
+      parsed !== null &&
+      Number.isFinite(parsed.estimatedDurationSeconds) &&
+      Number.isFinite(parsed.requestedDurationSeconds) &&
+      parsed.estimatedDurationSeconds > parsed.requestedDurationSeconds
+    );
+  });
+
 const metersToLatLngOffset = (origin: LatLng, distanceMeters: number, bearingDegrees: number): LatLng => {
   const earthRadiusMeters = 6_371_000;
   const bearing = bearingDegrees * (Math.PI / 180);
@@ -207,118 +232,145 @@ export class GoogleRoutesProvider {
     const targetDistanceMeters = durationMinutes * 155;
     const targetDurationSeconds = durationMinutes * 60;
     const bearings = [35, 160, 285, 110, 235];
-    const routePromises = Array.from({ length: targetCount }, async (_, index) => {
-      const bearing = bearings[index] ?? (index * 72);
-      const destinationDistance =
-        routeMode === "loop"
-          ? targetDistanceMeters * 0.42
-          : routeMode === "out_back"
-            ? targetDistanceMeters / 2
-            : targetDistanceMeters * 0.82;
-      const syntheticDestination = metersToLatLngOffset(start, destinationDistance, bearing);
-      const loopWaypoint = metersToLatLngOffset(start, targetDistanceMeters * 0.26, bearing + 65);
-      const destination = routeMode === "loop" ? start : syntheticDestination;
-      const intermediates =
-        routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
+    const loopAttemptScales = routeMode === "loop" ? LOOP_ATTEMPT_SCALES : [1];
+    let lastFailures: string[] = [];
 
-      try {
-        const response = await this.computeRoute(start, destination, intermediates);
-
-        const route = response.routes?.[0];
-        if (!route) {
-          throw new Error("no_routes");
-        }
-        if (!route.polyline?.encodedPolyline) {
-          throw new Error("missing_polyline");
-        }
-
-        const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
-        const estimatedDurationSeconds = parseDurationSeconds(route.duration) || targetDurationSeconds;
-        const endPoint = routeMode === "loop" ? start : syntheticDestination;
-        if (!isDurationWithinTolerance(estimatedDurationSeconds, targetDurationSeconds)) {
-          throw new Error(
-            `duration_out_of_range:${estimatedDurationSeconds}:${targetDurationSeconds}`
-          );
-        }
-        const durationFitScore = Math.max(
-          0,
-          1 - Math.abs(estimatedDurationSeconds - targetDurationSeconds) / targetDurationSeconds
-        );
-        const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
-        const routeToken = route.routeToken ?? null;
-
-        if (!routeToken) {
-          logger.info("routes.route_token.unavailable", {
-            routeMode,
-            candidateIndex: index,
-            travelMode: "WALK",
-            reason: "missing_in_response"
-          });
-        }
-
-        return {
-          routeId: `route_${routeMode}_${String(index + 1).padStart(2, "0")}`,
+    for (const [attemptIndex, loopScale] of loopAttemptScales.entries()) {
+      if (routeMode === "loop" && attemptIndex > 0) {
+        logger.info("routes.loop.retry.started", {
           routeMode,
-          label: routeLabel(routeMode, index),
-          distanceMeters,
-          estimatedDurationSeconds,
-          polyline: route.polyline.encodedPolyline,
-          highlights: [
-            routeMode === "loop" ? "google-routed loop structure" : "google-routed running line",
-            complexityBase <= 8 ? "lower turn complexity" : "more detailed urban routing"
-          ],
-          durationFitScore: Number(durationFitScore.toFixed(2)),
-          routeComplexityScore: Number(Math.min(1, complexityBase / 20).toFixed(2)),
-          startLatitude: start.latitude,
-          startLongitude: start.longitude,
-          endLatitude: endPoint.latitude,
-          endLongitude: endPoint.longitude,
-          apiSource: "routes_api",
-          navigationPayload: {
-            routeToken,
-            legs: legSteps(route)
-          }
-        } satisfies RouteCandidate;
-      } catch (error) {
-        this.logGoogleRouteError(
-          "routes.candidate.discarded",
-          {
-            routeMode,
-            candidateIndex: index,
-            bearing,
-            origin: start,
-            destination,
-            intermediateCount: intermediates.length
-          },
-          error
-        );
-        throw error;
+          desiredCount,
+          targetCount,
+          attempt: attemptIndex + 1,
+          loopScale
+        });
       }
-    });
 
-    const settled = await Promise.allSettled(routePromises);
-    const fulfilled = settled
-      .flatMap((result) => (result.status === "fulfilled" ? [result.value] : []))
-      .sort((left, right) => (right.durationFitScore - right.routeComplexityScore) - (left.durationFitScore - left.routeComplexityScore));
-    if (fulfilled.length === 0) {
-      const failures = settled.flatMap((result) =>
+      const routePromises = Array.from({ length: targetCount }, async (_, index) => {
+        const bearing = bearings[index] ?? (index * 72);
+        const destinationDistance =
+          routeMode === "loop"
+            ? targetDistanceMeters * 0.42 * loopScale
+            : routeMode === "out_back"
+              ? targetDistanceMeters / 2
+              : targetDistanceMeters * 0.82;
+        const syntheticDestination = metersToLatLngOffset(start, destinationDistance, bearing);
+        const loopWaypoint = metersToLatLngOffset(start, targetDistanceMeters * 0.26 * loopScale, bearing + 65);
+        const destination = routeMode === "loop" ? start : syntheticDestination;
+        const intermediates =
+          routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
+
+        try {
+          const response = await this.computeRoute(start, destination, intermediates);
+
+          const route = response.routes?.[0];
+          if (!route) {
+            throw new Error("no_routes");
+          }
+          if (!route.polyline?.encodedPolyline) {
+            throw new Error("missing_polyline");
+          }
+
+          const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
+          const estimatedDurationSeconds = parseDurationSeconds(route.duration) || targetDurationSeconds;
+          const endPoint = routeMode === "loop" ? start : syntheticDestination;
+          if (!isDurationWithinTolerance(estimatedDurationSeconds, targetDurationSeconds)) {
+            throw new Error(
+              `duration_out_of_range:${estimatedDurationSeconds}:${targetDurationSeconds}`
+            );
+          }
+          const durationFitScore = Math.max(
+            0,
+            1 - Math.abs(estimatedDurationSeconds - targetDurationSeconds) / targetDurationSeconds
+          );
+          const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
+          const routeToken = route.routeToken ?? null;
+
+          if (!routeToken) {
+            logger.info("routes.route_token.unavailable", {
+              routeMode,
+              candidateIndex: index,
+              travelMode: "WALK",
+              reason: "missing_in_response"
+            });
+          }
+
+          return {
+            routeId: `route_${routeMode}_${String(index + 1).padStart(2, "0")}`,
+            routeMode,
+            label: routeLabel(routeMode, index),
+            distanceMeters,
+            estimatedDurationSeconds,
+            polyline: route.polyline.encodedPolyline,
+            highlights: [
+              routeMode === "loop" ? "google-routed loop structure" : "google-routed running line",
+              complexityBase <= 8 ? "lower turn complexity" : "more detailed urban routing"
+            ],
+            durationFitScore: Number(durationFitScore.toFixed(2)),
+            routeComplexityScore: Number(Math.min(1, complexityBase / 20).toFixed(2)),
+            startLatitude: start.latitude,
+            startLongitude: start.longitude,
+            endLatitude: endPoint.latitude,
+            endLongitude: endPoint.longitude,
+            apiSource: "routes_api",
+            navigationPayload: {
+              routeToken,
+              legs: legSteps(route)
+            }
+          } satisfies RouteCandidate;
+        } catch (error) {
+          this.logGoogleRouteError(
+            "routes.candidate.discarded",
+            {
+              routeMode,
+              candidateIndex: index,
+              attempt: attemptIndex + 1,
+              loopScale,
+              bearing,
+              origin: start,
+              destination,
+              intermediateCount: intermediates.length
+            },
+            error
+          );
+          throw error;
+        }
+      });
+
+      const settled = await Promise.allSettled(routePromises);
+      const fulfilled = settled
+        .flatMap((result) => (result.status === "fulfilled" ? [result.value] : []))
+        .sort((left, right) => (right.durationFitScore - right.routeComplexityScore) - (left.durationFitScore - left.routeComplexityScore));
+
+      if (fulfilled.length > 0) {
+        return fulfilled.slice(0, targetCount);
+      }
+
+      lastFailures = settled.flatMap((result) =>
         result.status === "rejected"
           ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
           : []
       );
-      logger.error("routes.generate.failed", {
-        routeMode,
-        desiredCount,
-        targetCount,
-        start,
-        failures
-      });
-      throw new NoRouteCandidatesError(
-        "Google Routes API failed to produce a valid real route candidate.",
-        failures
-      );
+
+      if (
+        routeMode !== "loop" ||
+        attemptIndex === loopAttemptScales.length - 1 ||
+        !shouldRetryLoopWithSmallerRadius(lastFailures)
+      ) {
+        break;
+      }
     }
 
-    return fulfilled.slice(0, targetCount);
+    logger.error("routes.generate.failed", {
+      routeMode,
+      desiredCount,
+      targetCount,
+      start,
+      failures: lastFailures
+    });
+    throw new NoRouteCandidatesError(
+      "Google Routes API failed to produce a valid real route candidate.",
+      lastFailures
+    );
   }
 }

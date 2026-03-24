@@ -296,20 +296,60 @@ describe("Pathly backend", () => {
   });
 
   it("filters out route candidates whose durations are far above the requested target", async () => {
+    const longDurations = ["2993s", "2870s", "3100s", "2840s", "2760s", "2920s", "2700s", "2810s", "2950s"];
+    const responses = longDurations.map((duration, index) => ({
+      ok: true,
+      json: async () => ({
+        routes: [
+          {
+            distanceMeters: 7000 + index * 50,
+            duration,
+            routeToken: null,
+            polyline: { encodedPolyline: `too_long_${index + 1}` },
+            legs: [
+              {
+                distanceMeters: 7000 + index * 50,
+                duration,
+                steps: []
+              }
+            ]
+          }
+        ]
+      })
+    }));
+
+    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      await expect(
+        provider.generateCandidates("loop", 10, 3, {
+          latitude: 41.8819,
+          longitude: -87.6278
+        })
+      ).rejects.toThrow("Google Routes API failed to produce a valid real route candidate.");
+      expect(fetchMock).toHaveBeenCalledTimes(9);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("retries short loop requests with smaller geometry when the first attempt is too long", async () => {
     const responses = [
       {
         ok: true,
         json: async () => ({
           routes: [
             {
-              distanceMeters: 7200,
-              duration: "2993s",
+              distanceMeters: 4200,
+              duration: "1843s",
               routeToken: null,
-              polyline: { encodedPolyline: "too_long_1" },
+              polyline: { encodedPolyline: "first_pass_1" },
               legs: [
                 {
-                  distanceMeters: 7200,
-                  duration: "2993s",
+                  distanceMeters: 4200,
+                  duration: "1843s",
                   steps: []
                 }
               ]
@@ -322,14 +362,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 6900,
-              duration: "2870s",
+              distanceMeters: 4300,
+              duration: "1873s",
               routeToken: null,
-              polyline: { encodedPolyline: "too_long_2" },
+              polyline: { encodedPolyline: "first_pass_2" },
               legs: [
                 {
-                  distanceMeters: 6900,
-                  duration: "2870s",
+                  distanceMeters: 4300,
+                  duration: "1873s",
                   steps: []
                 }
               ]
@@ -342,14 +382,74 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 7600,
-              duration: "3100s",
+              distanceMeters: 4250,
+              duration: "1871s",
               routeToken: null,
-              polyline: { encodedPolyline: "too_long_3" },
+              polyline: { encodedPolyline: "first_pass_3" },
               legs: [
                 {
-                  distanceMeters: 7600,
-                  duration: "3100s",
+                  distanceMeters: 4250,
+                  duration: "1871s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 980,
+              duration: "540s",
+              routeToken: null,
+              polyline: { encodedPolyline: "retry_pass_1" },
+              legs: [
+                {
+                  distanceMeters: 980,
+                  duration: "540s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1020,
+              duration: "620s",
+              routeToken: null,
+              polyline: { encodedPolyline: "retry_pass_2" },
+              legs: [
+                {
+                  distanceMeters: 1020,
+                  duration: "620s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 1100,
+              duration: "700s",
+              routeToken: null,
+              polyline: { encodedPolyline: "retry_pass_3" },
+              legs: [
+                {
+                  distanceMeters: 1100,
+                  duration: "700s",
                   steps: []
                 }
               ]
@@ -364,12 +464,33 @@ describe("Pathly backend", () => {
 
     try {
       const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
-      await expect(
-        provider.generateCandidates("loop", 10, 3, {
-          latitude: 41.8819,
-          longitude: -87.6278
-        })
-      ).rejects.toThrow("Google Routes API failed to produce a valid real route candidate.");
+      const candidates = await provider.generateCandidates("loop", 10, 3, {
+        latitude: 41.8819,
+        longitude: -87.6278
+      });
+
+      const calls = fetchMock.mock.calls as unknown as Array<[unknown, { body?: string }?]>;
+      const firstAttemptBody = JSON.parse(String(calls[0]?.[1]?.body ?? "{}")) as {
+        origin: { location: { latLng: { latitude: number; longitude: number } } };
+        intermediates: Array<{ location: { latLng: { latitude: number; longitude: number } } }>;
+      };
+      const retryAttemptBody = JSON.parse(String(calls[3]?.[1]?.body ?? "{}")) as {
+        origin: { location: { latLng: { latitude: number; longitude: number } } };
+        intermediates: Array<{ location: { latLng: { latitude: number; longitude: number } } }>;
+      };
+      const origin = firstAttemptBody.origin.location.latLng;
+      const offsetMagnitude = (point: { latitude: number; longitude: number }) =>
+        Math.abs(point.latitude - origin.latitude) + Math.abs(point.longitude - origin.longitude);
+
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(candidates).toHaveLength(3);
+      expect(candidates.every((candidate) => candidate.estimatedDurationSeconds <= 960)).toBe(true);
+      expect(offsetMagnitude(retryAttemptBody.intermediates[0].location.latLng)).toBeLessThan(
+        offsetMagnitude(firstAttemptBody.intermediates[0].location.latLng)
+      );
+      expect(offsetMagnitude(retryAttemptBody.intermediates[1].location.latLng)).toBeLessThan(
+        offsetMagnitude(firstAttemptBody.intermediates[1].location.latLng)
+      );
     } finally {
       vi.unstubAllGlobals();
     }
