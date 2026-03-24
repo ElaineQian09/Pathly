@@ -296,7 +296,7 @@ describe("Pathly backend", () => {
   });
 
   it("filters out route candidates whose durations are far above the requested target", async () => {
-    const longDurations = ["2993s", "2870s", "3100s", "2840s", "2760s", "2920s", "2700s", "2810s", "2950s"];
+    const longDurations = ["1500s", "1450s", "1520s", "1420s", "1380s", "1460s", "1350s", "1410s", "1490s"];
     const responses = longDurations.map((duration, index) => ({
       ok: true,
       json: async () => ({
@@ -330,6 +330,87 @@ describe("Pathly backend", () => {
         })
       ).rejects.toThrow("Google Routes API failed to produce a valid real route candidate.");
       expect(fetchMock).toHaveBeenCalledTimes(9);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("uses minute-based duration tolerance bands instead of wide percentage ranges", async () => {
+    const responses = [
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 2300,
+              duration: "1560s",
+              routeToken: null,
+              polyline: { encodedPolyline: "within_band" },
+              legs: [
+                {
+                  distanceMeters: 2300,
+                  duration: "1560s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 2800,
+              duration: "1920s",
+              routeToken: null,
+              polyline: { encodedPolyline: "outside_band_1" },
+              legs: [
+                {
+                  distanceMeters: 2800,
+                  duration: "1920s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 2850,
+              duration: "1935s",
+              routeToken: null,
+              polyline: { encodedPolyline: "outside_band_2" },
+              legs: [
+                {
+                  distanceMeters: 2850,
+                  duration: "1935s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      }
+    ];
+
+    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      const candidates = await provider.generateCandidates("loop", 20, 3, {
+        latitude: 41.8819,
+        longitude: -87.6278
+      });
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.estimatedDurationSeconds).toBe(1560);
     } finally {
       vi.unstubAllGlobals();
     }

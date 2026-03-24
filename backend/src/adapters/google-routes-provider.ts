@@ -41,12 +41,34 @@ const parseDurationSeconds = (value: string | undefined): number => {
   return Number(value.replace("s", ""));
 };
 
+const targetMetersPerMinute = (routeMode: RouteMode) => {
+  switch (routeMode) {
+    case "loop":
+      return 105;
+    case "out_back":
+      return 110;
+    case "one_way":
+      return 115;
+  }
+};
+
+const allowedDurationDeltaSeconds = (requestedDurationSeconds: number) => {
+  const requestedMinutes = requestedDurationSeconds / 60;
+  if (requestedMinutes <= 20) {
+    return 6 * 60;
+  }
+  if (requestedMinutes <= 40) {
+    return 8 * 60;
+  }
+  return 10 * 60;
+};
+
 const isDurationWithinTolerance = (
   estimatedDurationSeconds: number,
   requestedDurationSeconds: number
 ) =>
-  estimatedDurationSeconds >= requestedDurationSeconds * 0.6 &&
-  estimatedDurationSeconds <= requestedDurationSeconds * 1.6;
+  Math.abs(estimatedDurationSeconds - requestedDurationSeconds) <=
+  allowedDurationDeltaSeconds(requestedDurationSeconds);
 
 const LOOP_ATTEMPT_SCALES = [1, 0.72, 0.52];
 
@@ -513,7 +535,7 @@ export class GoogleRoutesProvider {
     }
 
     const targetCount = routeMode === "loop" ? Math.max(3, desiredCount) : desiredCount;
-    const targetDistanceMeters = durationMinutes * 155;
+    const targetDistanceMeters = durationMinutes * targetMetersPerMinute(routeMode);
     const targetDurationSeconds = durationMinutes * 60;
     const bearings = [35, 160, 285, 110, 235];
     const loopAttemptScales = routeMode === "loop" ? LOOP_ATTEMPT_SCALES : [1];
