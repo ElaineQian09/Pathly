@@ -37,6 +37,13 @@ const parseDurationSeconds = (value: string | undefined): number => {
   return Number(value.replace("s", ""));
 };
 
+const isDurationWithinTolerance = (
+  estimatedDurationSeconds: number,
+  requestedDurationSeconds: number
+) =>
+  estimatedDurationSeconds >= requestedDurationSeconds * 0.6 &&
+  estimatedDurationSeconds <= requestedDurationSeconds * 1.6;
+
 const metersToLatLngOffset = (origin: LatLng, distanceMeters: number, bearingDegrees: number): LatLng => {
   const earthRadiusMeters = 6_371_000;
   const bearing = bearingDegrees * (Math.PI / 180);
@@ -198,12 +205,18 @@ export class GoogleRoutesProvider {
 
     const targetCount = routeMode === "loop" ? Math.max(3, desiredCount) : desiredCount;
     const targetDistanceMeters = durationMinutes * 155;
+    const targetDurationSeconds = durationMinutes * 60;
     const bearings = [35, 160, 285, 110, 235];
     const routePromises = Array.from({ length: targetCount }, async (_, index) => {
       const bearing = bearings[index] ?? (index * 72);
-      const destinationDistance = routeMode === "out_back" ? targetDistanceMeters / 2 : targetDistanceMeters * 0.82;
+      const destinationDistance =
+        routeMode === "loop"
+          ? targetDistanceMeters * 0.42
+          : routeMode === "out_back"
+            ? targetDistanceMeters / 2
+            : targetDistanceMeters * 0.82;
       const syntheticDestination = metersToLatLngOffset(start, destinationDistance, bearing);
-      const loopWaypoint = metersToLatLngOffset(start, targetDistanceMeters / 3, bearing + 65);
+      const loopWaypoint = metersToLatLngOffset(start, targetDistanceMeters * 0.26, bearing + 65);
       const destination = routeMode === "loop" ? start : syntheticDestination;
       const intermediates =
         routeMode === "loop" ? [syntheticDestination, loopWaypoint] : routeMode === "out_back" ? [syntheticDestination] : [];
@@ -220,9 +233,17 @@ export class GoogleRoutesProvider {
         }
 
         const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
-        const estimatedDurationSeconds = parseDurationSeconds(route.duration) || durationMinutes * 60;
+        const estimatedDurationSeconds = parseDurationSeconds(route.duration) || targetDurationSeconds;
         const endPoint = routeMode === "loop" ? start : syntheticDestination;
-        const durationFitScore = Math.max(0, 1 - Math.abs(estimatedDurationSeconds - durationMinutes * 60) / (durationMinutes * 60));
+        if (!isDurationWithinTolerance(estimatedDurationSeconds, targetDurationSeconds)) {
+          throw new Error(
+            `duration_out_of_range:${estimatedDurationSeconds}:${targetDurationSeconds}`
+          );
+        }
+        const durationFitScore = Math.max(
+          0,
+          1 - Math.abs(estimatedDurationSeconds - targetDurationSeconds) / targetDurationSeconds
+        );
         const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
         const routeToken = route.routeToken ?? null;
 

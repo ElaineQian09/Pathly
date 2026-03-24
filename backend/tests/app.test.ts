@@ -115,14 +115,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1000,
-              duration: "600s",
+              distanceMeters: 6700,
+              duration: "2660s",
               polyline: { encodedPolyline: "abc123" },
               routeToken: null,
               legs: [
                 {
-                  distanceMeters: 1000,
-                  duration: "600s",
+                  distanceMeters: 6700,
+                  duration: "2660s",
                   steps: []
                 }
               ]
@@ -135,14 +135,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1100,
-              duration: "620s",
+              distanceMeters: 6900,
+              duration: "2720s",
               polyline: { encodedPolyline: "def456" },
               routeToken: null,
               legs: [
                 {
-                  distanceMeters: 1100,
-                  duration: "620s",
+                  distanceMeters: 6900,
+                  duration: "2720s",
                   steps: []
                 }
               ]
@@ -155,14 +155,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1200,
-              duration: "640s",
+              distanceMeters: 7100,
+              duration: "2840s",
               polyline: { encodedPolyline: "ghi789" },
               routeToken: null,
               legs: [
                 {
-                  distanceMeters: 1200,
-                  duration: "640s",
+                  distanceMeters: 7100,
+                  duration: "2840s",
                   steps: []
                 }
               ]
@@ -201,14 +201,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1000,
-              duration: "600s",
+              distanceMeters: 6700,
+              duration: "2660s",
               routeToken: "walk_token_123",
               polyline: { encodedPolyline: "abc123" },
               legs: [
                 {
-                  distanceMeters: 1000,
-                  duration: "600s",
+                  distanceMeters: 6700,
+                  duration: "2660s",
                   steps: []
                 }
               ]
@@ -221,14 +221,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1100,
-              duration: "620s",
+              distanceMeters: 6900,
+              duration: "2720s",
               routeToken: "walk_token_456",
               polyline: { encodedPolyline: "def456" },
               legs: [
                 {
-                  distanceMeters: 1100,
-                  duration: "620s",
+                  distanceMeters: 6900,
+                  duration: "2720s",
                   steps: []
                 }
               ]
@@ -241,14 +241,14 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              distanceMeters: 1200,
-              duration: "640s",
+              distanceMeters: 7100,
+              duration: "2840s",
               routeToken: "walk_token_789",
               polyline: { encodedPolyline: "ghi789" },
               legs: [
                 {
-                  distanceMeters: 1200,
-                  duration: "640s",
+                  distanceMeters: 7100,
+                  duration: "2840s",
                   steps: []
                 }
               ]
@@ -286,10 +286,90 @@ describe("Pathly backend", () => {
       expect(firstCallBody.polylineEncoding).toBe("ENCODED_POLYLINE");
       expect(firstCallBody.polylineQuality).toBe("OVERVIEW");
       expect(candidates.map((candidate) => candidate.navigationPayload.routeToken)).toEqual([
-        "walk_token_789",
+        "walk_token_123",
         "walk_token_456",
-        "walk_token_123"
+        "walk_token_789"
       ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("filters out route candidates whose durations are far above the requested target", async () => {
+    const responses = [
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 7200,
+              duration: "2993s",
+              routeToken: null,
+              polyline: { encodedPolyline: "too_long_1" },
+              legs: [
+                {
+                  distanceMeters: 7200,
+                  duration: "2993s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 6900,
+              duration: "2870s",
+              routeToken: null,
+              polyline: { encodedPolyline: "too_long_2" },
+              legs: [
+                {
+                  distanceMeters: 6900,
+                  duration: "2870s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      },
+      {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distanceMeters: 7600,
+              duration: "3100s",
+              routeToken: null,
+              polyline: { encodedPolyline: "too_long_3" },
+              legs: [
+                {
+                  distanceMeters: 7600,
+                  duration: "3100s",
+                  steps: []
+                }
+              ]
+            }
+          ]
+        })
+      }
+    ];
+
+    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
+      await expect(
+        provider.generateCandidates("loop", 10, 3, {
+          latitude: 41.8819,
+          longitude: -87.6278
+        })
+      ).rejects.toThrow("Google Routes API failed to produce a valid real route candidate.");
     } finally {
       vi.unstubAllGlobals();
     }
