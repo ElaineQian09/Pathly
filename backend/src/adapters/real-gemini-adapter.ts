@@ -50,6 +50,30 @@ type LiveServerMessage = {
 const LIVE_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
+export const buildLiveSetupPayload = (
+  liveModel: string,
+  liveVoice: string,
+  systemInstruction: string
+) => ({
+  setup: {
+    model: `models/${liveModel}`,
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: liveVoice
+          }
+        }
+      }
+    },
+    systemInstruction: {
+      parts: [{ text: systemInstruction }]
+    },
+    outputAudioTranscription: {}
+  }
+});
+
 const buildPlaybackPrompt = (
   plan: TurnPlan,
   session: RunSession,
@@ -173,25 +197,7 @@ export class RealGeminiAdapter {
           voice: this.liveVoice
         });
         socket.send(
-          JSON.stringify({
-            setup: {
-              model: `models/${this.liveModel}`,
-              generationConfig: {
-                responseModalities: ["AUDIO"]
-              },
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: this.liveVoice
-                  }
-                }
-              },
-              systemInstruction: {
-                parts: [{ text: systemInstruction }]
-              },
-              outputAudioTranscription: {}
-            }
-          })
+          JSON.stringify(buildLiveSetupPayload(this.liveModel, this.liveVoice, systemInstruction))
         );
       });
 

@@ -28,10 +28,7 @@ type ComputeRoutesResponse = {
 };
 
 const BASE_ROUTE_FIELD_MASK =
-  "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver";
-
-const ROUTE_TOKEN_FIELD_MASK =
-  "routes.routeToken,routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline";
+  "routes.routeToken,routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction.instructions,routes.legs.steps.navigationInstruction.maneuver";
 
 const parseDurationSeconds = (value: string | undefined): number => {
   if (!value) {
@@ -95,7 +92,7 @@ export class GoogleRoutesProvider {
     destination: LatLng,
     intermediates: LatLng[] = [],
     options?: {
-      requestKind?: "base_route" | "route_token";
+      requestKind?: "base_route";
       travelMode?: "WALK" | "DRIVE" | "TWO_WHEELER";
       routingPreference?: "TRAFFIC_UNAWARE" | "TRAFFIC_AWARE" | "TRAFFIC_AWARE_OPTIMAL";
       fieldMask?: string;
@@ -163,7 +160,7 @@ export class GoogleRoutesProvider {
   }
 
   private logGoogleRouteError(
-    event: "routes.candidate.discarded" | "routes.route_token.error",
+    event: "routes.candidate.discarded",
     fields: Record<string, unknown>,
     error: unknown
   ) {
@@ -184,35 +181,6 @@ export class GoogleRoutesProvider {
       ...fields,
       reason: error instanceof Error ? error.message : String(error)
     });
-  }
-
-  private async computeRouteToken(origin: LatLng, destination: LatLng, intermediates: LatLng[]): Promise<string | null> {
-    try {
-      const tokenResponse = await this.computeRoute(origin, destination, intermediates, {
-        requestKind: "route_token",
-        travelMode: "DRIVE",
-        routingPreference: "TRAFFIC_AWARE",
-        fieldMask: ROUTE_TOKEN_FIELD_MASK
-      });
-      const routeToken = tokenResponse.routes?.[0]?.routeToken ?? null;
-      if (!routeToken) {
-        logger.warn("routes.route_token.unavailable", {
-          requestKind: "route_token",
-          reason: "missing_in_response"
-        });
-      }
-      return routeToken;
-    } catch (error) {
-      this.logGoogleRouteError(
-        "routes.route_token.error",
-        {
-          requestKind: "route_token",
-          apiKeyFingerprint: fingerprintSecret(this.apiKey)
-        },
-        error
-      );
-      return null;
-    }
   }
 
   async generateCandidates(
@@ -242,7 +210,6 @@ export class GoogleRoutesProvider {
 
       try {
         const response = await this.computeRoute(start, destination, intermediates);
-        const routeToken = await this.computeRouteToken(start, destination, intermediates);
 
         const route = response.routes?.[0];
         if (!route) {
@@ -251,15 +218,22 @@ export class GoogleRoutesProvider {
         if (!route.polyline?.encodedPolyline) {
           throw new Error("missing_polyline");
         }
-        if (!routeToken) {
-          throw new Error("missing_route_token");
-        }
 
         const distanceMeters = route.distanceMeters ?? Math.round(targetDistanceMeters);
         const estimatedDurationSeconds = parseDurationSeconds(route.duration) || durationMinutes * 60;
         const endPoint = routeMode === "loop" ? start : syntheticDestination;
         const durationFitScore = Math.max(0, 1 - Math.abs(estimatedDurationSeconds - durationMinutes * 60) / (durationMinutes * 60));
         const complexityBase = route.legs?.reduce((count, leg) => count + (leg.steps?.length ?? 0), 0) ?? 0;
+        const routeToken = route.routeToken ?? null;
+
+        if (!routeToken) {
+          logger.info("routes.route_token.unavailable", {
+            routeMode,
+            candidateIndex: index,
+            travelMode: "WALK",
+            reason: "missing_in_response"
+          });
+        }
 
         return {
           routeId: `route_${routeMode}_${String(index + 1).padStart(2, "0")}`,

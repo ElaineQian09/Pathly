@@ -118,6 +118,7 @@ describe("Pathly backend", () => {
               distanceMeters: 1000,
               duration: "600s",
               polyline: { encodedPolyline: "abc123" },
+              routeToken: null,
               legs: [
                 {
                   distanceMeters: 1000,
@@ -134,22 +135,10 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              routeToken: "token_123",
-              distanceMeters: 1000,
-              duration: "600s",
-              polyline: { encodedPolyline: "abc123" }
-            }
-          ]
-        })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
               distanceMeters: 1100,
               duration: "620s",
               polyline: { encodedPolyline: "def456" },
+              routeToken: null,
               legs: [
                 {
                   distanceMeters: 1100,
@@ -166,22 +155,10 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              routeToken: "token_456",
-              distanceMeters: 1100,
-              duration: "620s",
-              polyline: { encodedPolyline: "def456" }
-            }
-          ]
-        })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
               distanceMeters: 1200,
               duration: "640s",
               polyline: { encodedPolyline: "ghi789" },
+              routeToken: null,
               legs: [
                 {
                   distanceMeters: 1200,
@@ -189,19 +166,6 @@ describe("Pathly backend", () => {
                   steps: []
                 }
               ]
-            }
-          ]
-        })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
-              routeToken: "token_789",
-              distanceMeters: 1200,
-              duration: "640s",
-              polyline: { encodedPolyline: "ghi789" }
             }
           ]
         })
@@ -230,7 +194,7 @@ describe("Pathly backend", () => {
     }
   });
 
-  it("requests routeToken with the documented DRIVE traffic-aware field mask", async () => {
+  it("keeps routeToken aligned with the selected WALK route request", async () => {
     const responses = [
       {
         ok: true,
@@ -239,6 +203,7 @@ describe("Pathly backend", () => {
             {
               distanceMeters: 1000,
               duration: "600s",
+              routeToken: "walk_token_123",
               polyline: { encodedPolyline: "abc123" },
               legs: [
                 {
@@ -256,21 +221,9 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              routeToken: "token_123",
-              distanceMeters: 1000,
-              duration: "600s",
-              polyline: { encodedPolyline: "abc123" }
-            }
-          ]
-        })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
               distanceMeters: 1100,
               duration: "620s",
+              routeToken: "walk_token_456",
               polyline: { encodedPolyline: "def456" },
               legs: [
                 {
@@ -288,21 +241,9 @@ describe("Pathly backend", () => {
         json: async () => ({
           routes: [
             {
-              routeToken: "token_456",
-              distanceMeters: 1100,
-              duration: "620s",
-              polyline: { encodedPolyline: "def456" }
-            }
-          ]
-        })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
               distanceMeters: 1200,
               duration: "640s",
+              routeToken: "walk_token_789",
               polyline: { encodedPolyline: "ghi789" },
               legs: [
                 {
@@ -314,19 +255,6 @@ describe("Pathly backend", () => {
             }
           ]
         })
-      },
-      {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
-              routeToken: "token_789",
-              distanceMeters: 1200,
-              duration: "640s",
-              polyline: { encodedPolyline: "ghi789" }
-            }
-          ]
-        })
       }
     ];
 
@@ -335,7 +263,7 @@ describe("Pathly backend", () => {
 
     try {
       const provider = new GoogleRoutesProvider("AIzaSy_testKey1234", new MockRoutesProvider());
-      await provider.generateCandidates("loop", 45, 3, {
+      const candidates = await provider.generateCandidates("loop", 45, 3, {
         latitude: 41.8819,
         longitude: -87.6278
       });
@@ -343,25 +271,25 @@ describe("Pathly backend", () => {
       const calls = fetchMock.mock.calls as unknown as Array<
         [unknown, { headers?: Record<string, string>; body?: string }?]
       >;
-      const routeTokenCall = calls.find((call) => {
-        const body = JSON.parse(String(call[1]?.body ?? "{}")) as { travelMode?: string };
-        return body.travelMode === "DRIVE";
-      });
-      const routeTokenHeaders = routeTokenCall?.[1]?.headers as Record<string, string>;
-      const routeTokenBody = JSON.parse(String(routeTokenCall?.[1]?.body ?? "{}")) as {
+      const firstCallHeaders = calls[0]?.[1]?.headers as Record<string, string>;
+      const firstCallBody = JSON.parse(String(calls[0]?.[1]?.body ?? "{}")) as {
         travelMode?: string;
         routingPreference?: string;
         polylineEncoding?: string;
         polylineQuality?: string;
       };
 
-      expect(routeTokenHeaders["x-goog-fieldmask"]).toBe(
-        "routes.routeToken,routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
-      );
-      expect(routeTokenBody.travelMode).toBe("DRIVE");
-      expect(routeTokenBody.routingPreference).toBe("TRAFFIC_AWARE");
-      expect(routeTokenBody.polylineEncoding).toBe("ENCODED_POLYLINE");
-      expect(routeTokenBody.polylineQuality).toBe("OVERVIEW");
+      expect(calls).toHaveLength(3);
+      expect(firstCallHeaders["x-goog-fieldmask"]).toContain("routes.routeToken");
+      expect(firstCallBody.travelMode).toBe("WALK");
+      expect(firstCallBody).not.toHaveProperty("routingPreference");
+      expect(firstCallBody.polylineEncoding).toBe("ENCODED_POLYLINE");
+      expect(firstCallBody.polylineQuality).toBe("OVERVIEW");
+      expect(candidates.map((candidate) => candidate.navigationPayload.routeToken)).toEqual([
+        "walk_token_789",
+        "walk_token_456",
+        "walk_token_123"
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }
