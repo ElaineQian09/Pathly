@@ -167,6 +167,7 @@ export class RealGeminiAdapter {
           });
           logger.info("gemini.live.audio.received", {
             turnId: metadata.turnId,
+            speaker: metadata.speaker,
             mimeType: audioMimeType ?? "audio/pcm;rate=24000",
             upstreamBytes: rawAudio.length,
             upstreamSampleRateHz: parsedFormat.sampleRateHz,
@@ -320,6 +321,7 @@ export class RealGeminiAdapter {
       logger.info("gemini.live.playback.start", {
         turnId: plan.turnId,
         speaker: plan.speaker,
+        model: this.liveModel,
         buckets: plan.contentBuckets,
         placeCount: places.length,
         newsCount: news.length
@@ -341,13 +343,22 @@ export class RealGeminiAdapter {
     } catch (error) {
       logger.warn("gemini.live.playback.error", {
         turnId: plan.turnId,
+        speaker: plan.speaker,
         message: error instanceof Error ? error.message : String(error)
       });
+      const fallbackReason = error instanceof Error ? error.message : String(error);
+      logger.warn("gemini.live.playback.fallback", {
+        turnId: plan.turnId,
+        speaker: plan.speaker,
+        fallbackReason
+      });
+      return this.fallback.composePlayback(plan, session, places, news);
     }
 
     logger.warn("gemini.live.playback.fallback", {
       turnId: plan.turnId,
-      speaker: plan.speaker
+      speaker: plan.speaker,
+      fallbackReason: "live_returned_null"
     });
     return this.fallback.composePlayback(plan, session, places, news);
   }
