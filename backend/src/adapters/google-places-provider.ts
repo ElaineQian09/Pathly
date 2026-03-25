@@ -31,8 +31,21 @@ export class GooglePlacesProvider {
           "places.id,places.displayName,places.formattedAddress,places.primaryTypeDisplayName"
       },
       body: JSON.stringify({
-        includedTypes: ["park", "tourist_attraction", "museum", "stadium"],
+        includedTypes: [
+          "park",
+          "tourist_attraction",
+          "museum",
+          "stadium",
+          "library",
+          "university",
+          "art_gallery",
+          "historical_place",
+          "monument",
+          "cultural_landmark",
+          "transit_station"
+        ],
         maxResultCount: 5,
+        rankPreference: "DISTANCE",
         locationRestriction: {
           circle: {
             center: {

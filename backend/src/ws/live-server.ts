@@ -50,6 +50,16 @@ type SocketLike = {
 
 const parseJson = (raw: string) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> };
 
+const sendError = (socket: SocketLike, code: string, message: string) => {
+  socket.send(JSON.stringify({
+    type: "error",
+    payload: {
+      code,
+      message
+    }
+  }));
+};
+
 const sendAudioChunks = (socket: SocketLike, sessionId: string, turnId: string, audioChunks: string[]) => {
   audioChunks.forEach((audioBase64, chunkIndex) => {
     const chunk: PlaybackAudioChunk = {
@@ -234,7 +244,20 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
             placeCount: places.length,
             newsCount: news.length
           });
-          const segment = await deps.geminiAdapter.composePlayback(plan, session, places, news);
+          let segment: GeneratedAudioMessage<PlaybackSegment>;
+          try {
+            segment = await deps.geminiAdapter.composePlayback(plan, session, places, news);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn("ws.gemini.playback.failed", {
+              sessionId,
+              turnId: plan.turnId,
+              speaker: plan.speaker,
+              message
+            });
+            sendError(socket, "live_playback_failed", message);
+            break;
+          }
           logger.info("ws.gemini.playback.done", {
             sessionId,
             turnId: plan.turnId,
@@ -330,17 +353,30 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           intent
         });
-        sendSegmentWithAudio(
-          socket,
-          sessionId,
-          "interrupt.result",
-          await deps.geminiAdapter.composeInterruptResult(
+        let interruptMessage: GeneratedAudioMessage<InterruptResult>;
+        try {
+          interruptMessage = await deps.geminiAdapter.composeInterruptResult(
             session,
             intent,
             intent === "preference_change"
               ? "Got it. I updated the run settings and the next turns will follow that immediately."
               : "I heard you. I will answer directly first, then bring the show back in cleanly."
-          )
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn("ws.gemini.interrupt.failed", {
+            sessionId,
+            intent,
+            message
+          });
+          sendError(socket, "live_playback_failed", message);
+          break;
+        }
+        sendSegmentWithAudio(
+          socket,
+          sessionId,
+          "interrupt.result",
+          interruptMessage
         );
         break;
       }
@@ -367,15 +403,30 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           chunkCount: session.voiceInterruptChunks.length
         });
+        let interruptMessage: GeneratedAudioMessage<InterruptResult>;
+        try {
+          interruptMessage = await deps.geminiAdapter.composeInterruptResult(
+            session,
+            "direct_answer",
+            "I heard the interruption and I am switching to a short direct response before resuming the show."
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn("ws.gemini.interrupt.failed", {
+            sessionId,
+            intent: "direct_answer",
+            message
+          });
+          sendError(socket, "live_playback_failed", message);
+          session.voiceInterruptChunks = [];
+          deps.sessionService.save(session);
+          break;
+        }
         sendSegmentWithAudio(
           socket,
           sessionId,
           "interrupt.result",
-          await deps.geminiAdapter.composeInterruptResult(
-            session,
-            "direct_answer",
-            "I heard the interruption and I am switching to a short direct response before resuming the show."
-          )
+          interruptMessage
         );
         session.voiceInterruptChunks = [];
         deps.sessionService.save(session);
@@ -428,13 +479,7 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           type: message.type
         });
-        socket.send(JSON.stringify({
-          type: "error",
-          payload: {
-            code: "unsupported_event",
-            message: `Unsupported websocket event: ${message.type}`
-          }
-        }));
+      sendError(socket, "unsupported_event", `Unsupported websocket event: ${message.type}`);
     }
   } catch (error) {
     logger.error("ws.message.error", {
@@ -443,13 +488,11 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
       stage,
       message: error instanceof Error ? error.message : "Invalid websocket message"
     });
-    socket.send(JSON.stringify({
-      type: "error",
-      payload: {
-        code: "invalid_message",
-        message: error instanceof Error ? error.message : "Invalid websocket message"
-      }
-    }));
+    sendError(
+      socket,
+      "invalid_message",
+      error instanceof Error ? error.message : "Invalid websocket message"
+    );
   }
 };
 

@@ -1,7 +1,6 @@
 import { loadConfig } from "../config.js";
 import { GooglePlacesProvider } from "../adapters/google-places-provider.js";
 import { GoogleRoutesProvider } from "../adapters/google-routes-provider.js";
-import { MockGeminiAdapter } from "../adapters/gemini-adapter.js";
 import { MockPlacesProvider } from "../adapters/places-provider.js";
 import { MockRoutesProvider } from "../adapters/routes-provider.js";
 import { MockRssProvider } from "../adapters/rss-provider.js";
@@ -23,7 +22,6 @@ export const createServices = () => {
   const mockRoutes = new MockRoutesProvider();
   const mockPlaces = new MockPlacesProvider();
   const mockRss = new MockRssProvider();
-  const mockGemini = new MockGeminiAdapter();
 
   const routeService = new RouteService(new GoogleRoutesProvider(config.googleApiKey, mockRoutes));
   const placeService = new PlaceService(new GooglePlacesProvider(config.googleApiKey, mockPlaces));
@@ -36,7 +34,7 @@ export const createServices = () => {
     config.geminiApiKey,
     config.geminiLiveModel,
     config.geminiLiveVoice,
-    mockGemini
+    config.geminiLiveAudioTimeoutMs
   );
 
   return {

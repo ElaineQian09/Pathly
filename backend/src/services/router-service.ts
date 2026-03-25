@@ -61,9 +61,8 @@ export class RouterService {
 
       const newsAllowed = !snapshot.nav.approachingManeuver && !snapshot.nav.offRoute;
       const biasedToLocal = (session.quickActionBias.local_context ?? 0) > (session.quickActionBias.news ?? 0);
-      const wantsLessTalking = session.preferences.talkDensity === "low";
       const newsDue = session.preferences.newsDensity === "medium" && session.newsTurnCounter >= 2;
-      if (newsAllowed && newsDue && !biasedToLocal && !wantsLessTalking) {
+      if (newsAllowed && newsDue && !biasedToLocal) {
         buckets.push("news");
       } else if (!buckets.includes("local_context")) {
         buckets.push("local_context");

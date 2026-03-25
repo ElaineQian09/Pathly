@@ -7,7 +7,6 @@ import {
   parseLiveAudioMimeType
 } from "../audio/pcm.js";
 import { logger } from "../logger.js";
-import { MockGeminiAdapter } from "./gemini-adapter.js";
 import type {
   InterruptResult,
   NewsItem,
@@ -74,6 +73,31 @@ export const buildLiveSetupPayload = (
   }
 });
 
+const buildDurationGuidance = (targetDurationSeconds: number) => {
+  if (targetDurationSeconds <= 12) {
+    return [
+      "Keep this extremely concise.",
+      "Prefer one clear point only.",
+      "Use short spoken sentences.",
+      "If multiple buckets are present, prioritize the most important one and keep supporting detail minimal."
+    ].join(" ");
+  }
+
+  if (targetDurationSeconds <= 20) {
+    return [
+      "Keep this compact but natural.",
+      "Cover one or two points with smooth spoken transitions.",
+      "Stay focused and route-aware."
+    ].join(" ");
+  }
+
+  return [
+    "You may be more expressive here.",
+    "Connect the route context with one or two supporting details.",
+    "Stay spoken, route-aware, and focused."
+  ].join(" ");
+};
+
 const buildPlaybackPrompt = (
   plan: TurnPlan,
   session: RunSession,
@@ -86,6 +110,7 @@ const buildPlaybackPrompt = (
     `Host style: ${session.preferences.hostStyle}.`,
     `Content buckets: ${plan.contentBuckets.join(", ")}.`,
     `Target duration seconds: ${plan.targetDurationSeconds}.`,
+    `Narration guidance: ${buildDurationGuidance(plan.targetDurationSeconds)}`,
     `Place facts: ${places.map((place) => place.fact).join(" | ") || "none"}.`,
     `News candidates: ${news.map((item) => item.headline).join(" | ") || "none"}.`,
     "Respond as short spoken audio in English. Keep it route-aware and natural.",
@@ -115,7 +140,7 @@ export class RealGeminiAdapter {
     private readonly apiKey: string | null,
     private readonly liveModel: string,
     private readonly liveVoice: string,
-    private readonly fallback: MockGeminiAdapter
+    private readonly liveAudioTimeoutMs: number
   ) {}
 
   private async synthesizeLiveAudio<T extends PlaybackSegment | InterruptResult>(
@@ -128,7 +153,7 @@ export class RealGeminiAdapter {
         turnId: metadata.turnId,
         reason: "missing_api_key"
       });
-      return null;
+      throw new Error("Gemini Live is unavailable: missing API key.");
     }
 
     return await new Promise<GeneratedAudioMessage<T> | null>((resolve, reject) => {
@@ -143,8 +168,12 @@ export class RealGeminiAdapter {
 
       const timeout = setTimeout(() => {
         socket.close();
-        reject(new Error("Gemini Live audio generation timed out."));
-      }, 20000);
+        reject(
+          new Error(
+            `Gemini Live audio generation timed out after ${this.liveAudioTimeoutMs}ms.`
+          )
+        );
+      }, this.liveAudioTimeoutMs);
 
       const finalize = () => {
         if (completed) {
@@ -195,7 +224,8 @@ export class RealGeminiAdapter {
         logger.info("gemini.live.socket.open", {
           turnId: metadata.turnId,
           model: this.liveModel,
-          voice: this.liveVoice
+          voice: this.liveVoice,
+          timeoutMs: this.liveAudioTimeoutMs
         });
         socket.send(
           JSON.stringify(buildLiveSetupPayload(this.liveModel, this.liveVoice, systemInstruction))
@@ -346,21 +376,15 @@ export class RealGeminiAdapter {
         speaker: plan.speaker,
         message: error instanceof Error ? error.message : String(error)
       });
-      const fallbackReason = error instanceof Error ? error.message : String(error);
-      logger.warn("gemini.live.playback.fallback", {
-        turnId: plan.turnId,
-        speaker: plan.speaker,
-        fallbackReason
-      });
-      return this.fallback.composePlayback(plan, session, places, news);
+      throw (error instanceof Error ? error : new Error(String(error)));
     }
 
-    logger.warn("gemini.live.playback.fallback", {
+    logger.warn("gemini.live.playback.empty", {
       turnId: plan.turnId,
       speaker: plan.speaker,
-      fallbackReason: "live_returned_null"
+      reason: "live_returned_null"
     });
-    return this.fallback.composePlayback(plan, session, places, news);
+    throw new Error("Gemini Live returned no audio message.");
   }
 
   async composeInterruptResult(
@@ -402,12 +426,14 @@ export class RealGeminiAdapter {
         turnId,
         message: error instanceof Error ? error.message : String(error)
       });
+      throw (error instanceof Error ? error : new Error(String(error)));
     }
 
-    logger.warn("gemini.live.interrupt.fallback", {
+    logger.warn("gemini.live.interrupt.empty", {
       turnId,
-      intent
+      intent,
+      reason: "live_returned_null"
     });
-    return this.fallback.composeInterruptResult(session, intent, transcriptPreview);
+    throw new Error("Gemini Live returned no audio message.");
   }
 }
