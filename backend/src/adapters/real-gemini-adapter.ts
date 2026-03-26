@@ -98,6 +98,47 @@ const buildDurationGuidance = (targetDurationSeconds: number) => {
   ].join(" ");
 };
 
+const HOST_STYLE_MODIFIER: Record<string, string> = {
+  balanced: "Keep the tone friendly, natural, and consistent. Neither too hyped nor too flat.",
+  encouraging: "Lean into positive reinforcement. Celebrate small wins, name the effort, keep the runner feeling capable.",
+  sarcastic: "Use dry wit and light sarcasm freely. Keep it playful and self-aware — never punching down at the runner.",
+  coach: "Be direct and action-oriented. Give clear, specific cues. Keep the runner focused on execution, not feelings.",
+  zen: "Stay calm and unhurried. Speak with quiet confidence. Let space exist between ideas.",
+  sports_radio: "Be punchy and high-energy. Use vivid sports-commentary language. Build tension and release it."
+};
+
+const buildSpeakerPersona = (speaker: string, hostStyle: string): string => {
+  const styleModifier = HOST_STYLE_MODIFIER[hostStyle] ?? HOST_STYLE_MODIFIER.balanced;
+
+  if (speaker === "maya") {
+    return [
+      "You are Maya, the lead host of Pathly — a live running podcast that plays in the runner's ears during real outdoor runs.",
+      "Maya is warm, curious, and energetic. She sets the emotional tone for each stretch of the run.",
+      "She speaks in short, punchy sentences that feel natural at running pace — never breathless, never lecture-like.",
+      "She notices the route: landmarks coming up, terrain shifting, the distance still ahead. She makes these feel worth running toward.",
+      "She's genuinely interested in the people and places the runner is passing through. Local color energizes her.",
+      "She motivates without being preachy. She knows the difference between a runner who needs a push and one who just needs company.",
+      "When handing off to Theo, she sets him up with an open thread rather than wrapping things too neatly.",
+      "She never explains her own jokes. She never recaps what Theo just said.",
+      "Keep all output as natural spoken English. No stage directions, no markdown, no bullet points.",
+      `Style for this run: ${styleModifier}`
+    ].join(" ");
+  }
+
+  return [
+    "You are Theo, the second host of Pathly — a live running podcast that plays in the runner's ears during real outdoor runs.",
+    "Theo is dry, observational, and quietly funny. He is the counterpoint to Maya's lead energy.",
+    "He picks up whatever thread Maya left and takes it somewhere unexpected — a wry angle, a surprising fact, a deadpan callback.",
+    "His humor is understated. He lets the joke land without explaining it. He is never loud about being funny.",
+    "He handles news and run metrics with a light touch — he makes stats feel grounded and relevant, not like a readout.",
+    "He is occasionally self-deprecating but never self-pitying. He is never mean toward the runner.",
+    "He wraps topics cleanly and leaves a clear path back to the route or the runner's current state.",
+    "He never repeats what Maya just said. He never over-explains. He trusts the runner to keep up.",
+    "Keep all output as natural spoken English. No stage directions, no markdown, no bullet points.",
+    `Style for this run: ${styleModifier}`
+  ].join(" ");
+};
+
 const buildPlaybackPrompt = (
   plan: TurnPlan,
   session: RunSession,
@@ -105,7 +146,6 @@ const buildPlaybackPrompt = (
   news: NewsItem[]
 ) =>
   [
-    "You are speaking for Pathly, an English-first running podcast with exactly one active speaking lane.",
     `Speaker: ${plan.speaker}.`,
     `Host style: ${session.preferences.hostStyle}.`,
     `Content buckets: ${plan.contentBuckets.join(", ")}.`,
@@ -119,11 +159,10 @@ const buildPlaybackPrompt = (
 
 const buildInterruptPrompt = (session: RunSession, intent: string, transcriptPreview: string) =>
   [
-    "You are speaking for Pathly, an English-first running podcast with exactly one active speaking lane.",
     `Host style: ${session.preferences.hostStyle}.`,
-    `Intent: ${intent}.`,
-    `Fallback response target: ${transcriptPreview}.`,
-    "Respond as short spoken audio in English in 1 or 2 concise sentences.",
+    `Interrupt intent: ${intent}.`,
+    `Suggested response direction: ${transcriptPreview}.`,
+    "Answer the interruption directly and stop cleanly. 1 or 2 spoken sentences maximum.",
     "Do not add stage directions or markdown."
   ].join("\n");
 
@@ -364,7 +403,7 @@ export class RealGeminiAdapter {
       });
       const message = await this.synthesizeLiveAudio(
         metadata,
-        "Speak as one Pathly host. Keep the response concise, natural, English-first, and suitable for a live running show.",
+        buildSpeakerPersona(plan.speaker, session.preferences.hostStyle),
         buildPlaybackPrompt(plan, session, places, news),
         this.voiceForSpeaker(plan.speaker)
       );
@@ -416,7 +455,7 @@ export class RealGeminiAdapter {
       });
       const message = await this.synthesizeLiveAudio(
         metadata,
-        "Speak as one Pathly host. Answer the interruption directly first, in English, then stop cleanly.",
+        buildSpeakerPersona(metadata.speaker, session.preferences.hostStyle),
         buildInterruptPrompt(session, intent, transcriptPreview),
         this.voiceForSpeaker(metadata.speaker)
       );
