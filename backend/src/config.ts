@@ -7,7 +7,8 @@ export type AppConfig = {
   geminiModel: string;
   geminiLiveModel: string;
   geminiPlannerModel: string;
-  geminiLiveVoice: string;
+  mayaVoice: string;
+  theoVoice: string;
   geminiLiveAudioTimeoutMs: number;
   baseUrl: string;
 };
@@ -31,7 +32,8 @@ export const loadConfig = (): AppConfig => ({
     process.env.GEMINI_MODEL ??
     "gemini-2.5-flash-native-audio-preview-12-2025",
   geminiPlannerModel: process.env.GEMINI_PLANNER_MODEL ?? "gemini-2.5-flash",
-  geminiLiveVoice: process.env.GEMINI_LIVE_VOICE ?? "Kore",
+  mayaVoice: process.env.MAYA_VOICE ?? "Aoede",
+  theoVoice: process.env.THEO_VOICE ?? "Charon",
   geminiLiveAudioTimeoutMs: parsePositiveInteger(process.env.GEMINI_LIVE_AUDIO_TIMEOUT_MS, 45000),
   baseUrl: process.env.PATHLY_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`
 });

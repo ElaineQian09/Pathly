@@ -33,7 +33,8 @@ export const createServices = () => {
   const geminiAdapter = new RealGeminiAdapter(
     config.geminiApiKey,
     config.geminiLiveModel,
-    config.geminiLiveVoice,
+    config.mayaVoice,
+    config.theoVoice,
     config.geminiLiveAudioTimeoutMs
   );
 

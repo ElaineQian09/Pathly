@@ -139,14 +139,20 @@ export class RealGeminiAdapter {
   constructor(
     private readonly apiKey: string | null,
     private readonly liveModel: string,
-    private readonly liveVoice: string,
+    private readonly mayaVoice: string,
+    private readonly theoVoice: string,
     private readonly liveAudioTimeoutMs: number
   ) {}
+
+  private voiceForSpeaker(speaker: string): string {
+    return speaker === "theo" ? this.theoVoice : this.mayaVoice;
+  }
 
   private async synthesizeLiveAudio<T extends PlaybackSegment | InterruptResult>(
     metadata: T,
     systemInstruction: string,
-    userPrompt: string
+    userPrompt: string,
+    voice: string
   ): Promise<GeneratedAudioMessage<T> | null> {
     if (!this.apiKey) {
       logger.warn("gemini.live.unavailable", {
@@ -224,11 +230,11 @@ export class RealGeminiAdapter {
         logger.info("gemini.live.socket.open", {
           turnId: metadata.turnId,
           model: this.liveModel,
-          voice: this.liveVoice,
+          voice,
           timeoutMs: this.liveAudioTimeoutMs
         });
         socket.send(
-          JSON.stringify(buildLiveSetupPayload(this.liveModel, this.liveVoice, systemInstruction))
+          JSON.stringify(buildLiveSetupPayload(this.liveModel, voice, systemInstruction))
         );
       });
 
@@ -359,7 +365,8 @@ export class RealGeminiAdapter {
       const message = await this.synthesizeLiveAudio(
         metadata,
         "Speak as one Pathly host. Keep the response concise, natural, English-first, and suitable for a live running show.",
-        buildPlaybackPrompt(plan, session, places, news)
+        buildPlaybackPrompt(plan, session, places, news),
+        this.voiceForSpeaker(plan.speaker)
       );
       if (message) {
         logger.info("gemini.live.playback.success", {
@@ -410,7 +417,8 @@ export class RealGeminiAdapter {
       const message = await this.synthesizeLiveAudio(
         metadata,
         "Speak as one Pathly host. Answer the interruption directly first, in English, then stop cleanly.",
-        buildInterruptPrompt(session, intent, transcriptPreview)
+        buildInterruptPrompt(session, intent, transcriptPreview),
+        this.voiceForSpeaker(metadata.speaker)
       );
       if (message) {
         logger.info("gemini.live.interrupt.success", {
