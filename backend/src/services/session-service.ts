@@ -31,6 +31,7 @@ export class SessionService {
       routeSelection: request.routeSelection,
       preferences,
       latestSnapshot: null,
+      previousSnapshot: null,
       currentSpeaker: openingSpeaker,
       recentBuckets: [],
       lastTurnAt: null,
@@ -41,7 +42,35 @@ export class SessionService {
       checkpoints: [],
       reconnectIssued: false,
       voiceInterruptChunks: [],
-      interruptedPlaybackTurnId: null
+      interruptedPlaybackTurnId: null,
+      scheduler: {
+        slots: {
+          activeTurnId: null,
+          pendingUrgentP0TurnId: null,
+          pendingUrgentP1TurnId: null,
+          pendingNormalLatestTurnId: null,
+          pendingRecoveryTurnId: null
+        },
+        lastNormalSnapshotAt: null,
+        lastNonUserInterruptAt: null,
+        interruptionHistory: [],
+        cooldownByTrigger: {},
+        offRouteState: {
+          startedAt: null,
+          maxDistanceMeters: 0,
+          bypassUsed: false
+        },
+        paceDeltaState: {
+          direction: null,
+          startedAt: null,
+          baselineSpeedMetersPerSecond: null,
+          lastTriggeredAt: null
+        },
+        lastInstructionSignature: null
+      },
+      turns: [],
+      conversationHistory: [],
+      lastNewsTurnAt: null
     };
     return this.store.saveSession(session);
   }

@@ -631,6 +631,14 @@ The websocket is the source of truth for active run coordination.
 
 Frontend should send navigation and motion fields that are already normalized from device SDKs. Backend should enrich those snapshots with nearby place context and news eligibility before invoking any model turn.
 
+Live turn scheduling now uses three priorities:
+
+- `P0`: hard urgent. Can preempt any active turn.
+- `P1`: soft urgent. Can preempt only `P2`.
+- `P2`: normal latest-only narration. Never preempts.
+
+Normal `context.snapshot` delivery should be on a `10s` cadence. Urgent route events should still be sent immediately when they happen.
+
 ### Client to Server
 
 #### `session.join`
@@ -648,7 +656,7 @@ Sent immediately after the websocket connects.
 
 #### `context.snapshot`
 
-Sent on a cadence during the active run.
+Sent on a `10s` cadence during the active run.
 
 ```json
 {
@@ -669,6 +677,7 @@ Sent on a cadence during the active run.
       "remainingDurationSeconds": 980,
       "distanceAlongRouteMeters": 4300,
       "offRoute": false,
+      "offRouteDistanceMeters": 0,
       "approachingManeuver": false,
       "atTurnaroundPoint": false
     },
@@ -829,15 +838,26 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "turnId": "turn_456",
     "speaker": "maya",
     "segmentType": "main_turn",
+    "turnType": "normal",
+    "priority": "P2",
+    "triggerType": "context_snapshot",
+    "supersedesTurnId": null,
+    "recoveryOfTurnId": null,
+    "timestamp": "2026-03-15T15:00:10Z",
     "contentBuckets": ["local_context", "banter"],
     "targetDurationSeconds": 18,
-    "reason": "user_entered_new_area",
+    "whyNow": "A fresh context snapshot arrived and the normal latest-only lane is due.",
+    "bridgeStyle": "handoff",
+    "interrupting": false,
+    "contextDelta": ["Runner covered another 140 meters since the last spoken context."],
     "safeInterruptAfterMs": 4000
   }
 }
 ```
 
 #### `playback.segment`
+
+`playback.segment` means the current turn is now playable. It does not mean the full turn has finished generating.
 
 ```json
 {
@@ -846,10 +866,18 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "turnId": "turn_456",
     "speaker": "maya",
     "segmentType": "main_turn",
-    "audioUrl": "https://example.com/audio/turn_456.mp3",
+    "turnType": "normal",
+    "priority": "P2",
+    "supersedesTurnId": null,
+    "recoveryOfTurnId": null,
+    "timestamp": "2026-03-15T15:00:10Z",
     "transcriptPreview": "You are about to hit one of the best sunrise stretches on the route...",
-    "safeInterruptAfterMs": 4000,
-    "estimatedPlaybackMs": 17600
+    "estimatedPlaybackMs": 17600,
+    "audioFormat": {
+      "encoding": "pcm_s16le",
+      "sampleRateHz": 24000,
+      "channelCount": 1
+    }
   }
 }
 ```
@@ -863,26 +891,82 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
     "turnId": "filler_001",
     "speaker": "theo",
     "segmentType": "filler",
-    "audioUrl": "https://example.com/audio/filler_001.mp3",
+    "turnType": "filler",
+    "priority": "P2",
+    "supersedesTurnId": null,
+    "recoveryOfTurnId": null,
+    "timestamp": "2026-03-15T15:01:00Z",
     "transcriptPreview": "Hold on, this next bit is worth it.",
-    "safeInterruptAfterMs": 0,
-    "estimatedPlaybackMs": 1800
+    "estimatedPlaybackMs": 1800,
+    "audioFormat": {
+      "encoding": "pcm_s16le",
+      "sampleRateHz": 24000,
+      "channelCount": 1
+    }
   }
 }
 ```
 
-#### `interrupt.result`
+#### `playback.audio.chunk`
 
 ```json
 {
-  "type": "interrupt.result",
+  "type": "playback.audio.chunk",
   "payload": {
-    "turnId": "turn_457",
-    "speaker": "theo",
-    "segmentType": "interrupt_response",
-    "intent": "preference_change",
-    "audioUrl": "https://example.com/audio/turn_457.mp3",
-    "transcriptPreview": "Got it. Less news, more local context from here."
+    "turnId": "turn_456",
+    "speaker": "maya",
+    "segmentType": "main_turn",
+    "turnType": "normal",
+    "priority": "P2",
+    "supersedesTurnId": null,
+    "recoveryOfTurnId": null,
+    "timestamp": "2026-03-15T15:00:10.400Z",
+    "chunkIndex": 0,
+    "audioBase64": "base64_pcm_chunk",
+    "isFinalChunk": false
+  }
+}
+```
+
+Frontend must dedupe and order streamed chunks by `turnId + chunkIndex`. Any chunk for a superseded or abandoned turn must be dropped even if it arrives late.
+
+#### `turn.superseded`
+
+```json
+{
+  "type": "turn.superseded",
+  "payload": {
+    "turnId": "turn_456",
+    "supersededByTurnId": "turn_457",
+    "timestamp": "2026-03-15T15:00:24Z"
+  }
+}
+```
+
+#### `playback.abandoned`
+
+```json
+{
+  "type": "playback.abandoned",
+  "payload": {
+    "turnId": "turn_456",
+    "supersededByTurnId": "turn_457",
+    "timestamp": "2026-03-15T15:00:24Z"
+  }
+}
+```
+
+`playback.abandoned` is the hard stop signal for the old turn. Frontend should stop playback immediately and discard any remaining or late chunks for that turn.
+
+#### `turn.recovery.created`
+
+```json
+{
+  "type": "turn.recovery.created",
+  "payload": {
+    "turnId": "turn_458",
+    "recoveryOfTurnId": "turn_456",
+    "timestamp": "2026-03-15T15:00:31Z"
   }
 }
 ```
@@ -927,7 +1011,9 @@ This is optional for UI introspection and debugging. Frontend may use it to upda
   "type": "error",
   "payload": {
     "code": "route_generation_failed",
-    "message": "Unable to generate route candidates right now."
+    "reason": "Unable to generate route candidates right now.",
+    "retryable": true,
+    "source": "router"
   }
 }
 ```
@@ -945,6 +1031,23 @@ Frontend should assume this state progression:
 7. `active` after recovery
 8. `ended`
 
+## PromptFrame Minimum Fields
+
+Every backend-generated turn should be built from the same PromptFrame envelope to avoid prompt drift.
+
+- SessionLayer: `sessionId`, `speaker`, `otherSpeaker`, `hostStyle`, `talkDensity`
+- TurnLayer: `turnType`, `priority`, `triggerType`, `whyNow`, `targetDurationSeconds`, `supersedesTurnId`, `recoveryOfTurnId`
+- ContextLayer: `latestSnapshot`, `contextDelta`, `contentBuckets`, `conversationHistoryWindow`
+- BehaviorLayer: duration constraint, anti-repeat constraint, two-host interaction constraint, bridge instruction
+
+Urgent turns must also set `interrupting=true` and `bridgeStyle=jumping_in`.
+
+Recovery turns must also include `interruptedContext`, `interruptedTranscript`, `interruptingTurnTranscript`, and `latestContext`, plus the explicit recovery decision modes:
+
+- `resume_previous_thread`
+- `half_sentence_summary_then_pivot`
+- `directly_move_to_new_context`
+
 ## Ownership Boundaries
 
 Frontend owns:
@@ -961,6 +1064,7 @@ Frontend owns:
 Backend owns:
 
 - speaker selection
+- scheduler priority and preemption policy
 - bucket selection
 - route-aware content planning
 - news selection and summarization
@@ -974,4 +1078,4 @@ Backend owns:
 
 - whether host renaming will be supported
 - whether transcript history beyond the compact strip will be persisted
-- whether playback audio will later move from URL-based clips to streamed chunks
+- whether filler behavior should become adaptive now that streamed turns and recovery exist

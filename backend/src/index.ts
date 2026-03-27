@@ -11,6 +11,7 @@ export const createPathlyServer = () => {
     routeService,
     sessionService,
     routerService,
+    schedulerService,
     placeService,
     newsService,
     checkpointService,
@@ -28,6 +29,7 @@ export const createPathlyServer = () => {
   attachLiveServer(server, {
     sessionService,
     routerService,
+    schedulerService,
     placeService,
     newsService,
     checkpointService,

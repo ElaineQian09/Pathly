@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Server as HttpServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { GeneratedAudioMessage, PATHLY_AUDIO_FORMAT, createGeneratedAudioMessage } from "../audio/pcm.js";
+import type { TurnStreamCallbacks, TurnStreamChunk, TurnStreamCompletion, TurnStreamHandle } from "../adapters/live-turn-stream.js";
 import { logger } from "../logger.js";
 import {
-  InterruptResult,
   NewsItem,
   PlaceCandidate,
   PlaybackAudioChunk,
@@ -19,25 +19,23 @@ import { CheckpointService } from "../services/checkpoint-service.js";
 import { NewsService } from "../services/news-service.js";
 import { PlaceService } from "../services/place-service.js";
 import { RouterService } from "../services/router-service.js";
+import { SchedulerService } from "../services/scheduler-service.js";
 import { SessionService } from "../services/session-service.js";
 
 type GeminiAdapterLike = {
-  composePlayback(
+  streamPlayback(
     plan: TurnPlan,
     session: RunSession,
     places: PlaceCandidate[],
-    news: NewsItem[]
-  ): Promise<GeneratedAudioMessage<PlaybackSegment>> | GeneratedAudioMessage<PlaybackSegment>;
-  composeInterruptResult(
-    session: RunSession,
-    intent: string,
-    transcriptPreview: string
-  ): Promise<GeneratedAudioMessage<InterruptResult>> | GeneratedAudioMessage<InterruptResult>;
+    news: NewsItem[],
+    callbacks: TurnStreamCallbacks<PlaybackSegment>
+  ): TurnStreamHandle;
 };
 
 type WsDependencies = {
   sessionService: SessionService;
   routerService: RouterService;
+  schedulerService: SchedulerService;
   placeService: PlaceService;
   newsService: NewsService;
   checkpointService: CheckpointService;
@@ -48,65 +46,359 @@ type SocketLike = {
   send(payload: string): void;
 };
 
+type RuntimeTurnState = {
+  handle: TurnStreamHandle;
+  metadata: PlaybackSegment | null;
+  bufferedChunks: TurnStreamChunk[];
+  emittedSegment: boolean;
+  flushedBufferedCount: number;
+  droppedChunks: number;
+  places: PlaceCandidate[];
+  news: NewsItem[];
+  completed: boolean;
+};
+
+type SessionRuntime = {
+  socket: SocketLike;
+  turns: Map<string, RuntimeTurnState>;
+};
+
+const runtimes = new Map<string, SessionRuntime>();
+
 const parseJson = (raw: string) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> };
 
-const sendError = (socket: SocketLike, code: string, message: string) => {
-  socket.send(JSON.stringify({
-    type: "error",
-    payload: {
-      code,
-      message
-    }
-  }));
+const getRuntime = (sessionId: string, socket: SocketLike): SessionRuntime => {
+  const existing = runtimes.get(sessionId);
+  if (existing) {
+    existing.socket = socket;
+    return existing;
+  }
+
+  const created: SessionRuntime = {
+    socket,
+    turns: new Map()
+  };
+  runtimes.set(sessionId, created);
+  return created;
 };
 
-const sendAudioChunks = (socket: SocketLike, sessionId: string, turnId: string, audioChunks: string[]) => {
-  audioChunks.forEach((audioBase64, chunkIndex) => {
-    const chunk: PlaybackAudioChunk = {
-      turnId,
-      chunkIndex,
-      audioBase64,
-      isFinalChunk: chunkIndex === audioChunks.length - 1
-    };
-    logger.info("ws.playback.audio.chunk.sent", {
-      sessionId,
-      turnId,
-      chunkIndex,
-      isFinalChunk: chunk.isFinalChunk,
-      chunkByteLength: Buffer.byteLength(audioBase64, "base64")
-    });
-    socket.send(JSON.stringify({
-      type: "playback.audio.chunk",
-      payload: chunk
-    }));
-  });
+const turnById = (session: RunSession, turnId: string) =>
+  session.turns.find((turn) => turn.plan.turnId === turnId);
+
+const activeTurn = (session: RunSession) =>
+  session.scheduler.slots.activeTurnId ? turnById(session, session.scheduler.slots.activeTurnId) : undefined;
+
+const emit = (socket: SocketLike, type: string, payload: Record<string, unknown>) => {
+  socket.send(JSON.stringify({ type, payload }));
 };
 
-const sendSegmentWithAudio = (
+const sendError = (
   socket: SocketLike,
-  sessionId: string,
-  eventType: "playback.segment" | "playback.filler" | "interrupt.result",
-  message: GeneratedAudioMessage<PlaybackSegment | PlaybackFiller | InterruptResult>
+  code: string,
+  reason: string,
+  retryable = false,
+  source: "provider" | "router" | "ws" | "player" = "ws"
 ) => {
-  const { audioChunks, ...metadata } = message;
-  const actualAudioBytes = audioChunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, "base64"), 0);
-  logger.info("ws.playback.segment.sent", {
-    sessionId,
-    eventType,
-    turnId: metadata.turnId,
-    speaker: metadata.speaker,
-    segmentType: metadata.segmentType,
-    estimatedPlaybackMs: metadata.estimatedPlaybackMs,
-    sampleRateHz: metadata.audioFormat.sampleRateHz,
-    channelCount: metadata.audioFormat.channelCount,
-    actualAudioBytes,
-    chunkCount: audioChunks.length
+  emit(socket, "error", {
+    code,
+    reason,
+    retryable,
+    source
   });
-  socket.send(JSON.stringify({
-    type: eventType,
-    payload: metadata
-  }));
-  sendAudioChunks(socket, sessionId, metadata.turnId, audioChunks);
+};
+
+const buildChunkPayload = (plan: TurnPlan, chunk: TurnStreamChunk): PlaybackAudioChunk => ({
+  turnId: plan.turnId,
+  speaker: plan.speaker,
+  segmentType: "main_turn",
+  turnType: plan.turnType,
+  priority: plan.priority,
+  supersedesTurnId: plan.supersedesTurnId,
+  recoveryOfTurnId: plan.recoveryOfTurnId,
+  timestamp: new Date().toISOString(),
+  chunkIndex: chunk.chunkIndex,
+  audioBase64: chunk.audioBase64,
+  isFinalChunk: chunk.isFinalChunk
+});
+
+const sendChunk = (runtime: SessionRuntime, payload: PlaybackAudioChunk) => {
+  logger.info("ws.playback.audio.chunk.sent", {
+    turnId: payload.turnId,
+    chunkIndex: payload.chunkIndex,
+    isFinalChunk: payload.isFinalChunk,
+    priority: payload.priority,
+    turnType: payload.turnType,
+    chunkByteLength: Buffer.byteLength(payload.audioBase64, "base64")
+  });
+  emit(runtime.socket, "playback.audio.chunk", payload);
+};
+
+const emitSegment = (runtime: SessionRuntime, plan: TurnPlan, metadata: PlaybackSegment) => {
+  emit(runtime.socket, "turn.plan", plan);
+  emit(runtime.socket, "playback.segment", metadata);
+};
+
+const emitSupersede = (runtime: SessionRuntime, supersededTurnId: string, supersedingTurnId: string) => {
+  emit(runtime.socket, "turn.superseded", {
+    turnId: supersededTurnId,
+    supersededByTurnId: supersedingTurnId,
+    timestamp: new Date().toISOString()
+  });
+  emit(runtime.socket, "playback.abandoned", {
+    turnId: supersededTurnId,
+    supersededByTurnId: supersedingTurnId,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const emitRecoveryCreated = (runtime: SessionRuntime, recoveryTurnId: string, recoveryOfTurnId: string) => {
+  emit(runtime.socket, "turn.recovery.created", {
+    turnId: recoveryTurnId,
+    recoveryOfTurnId,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const cancelTurnRuntime = (runtime: SessionRuntime, turnId: string) => {
+  const turnRuntime = runtime.turns.get(turnId);
+  if (!turnRuntime) {
+    return;
+  }
+  turnRuntime.handle.cancel();
+};
+
+const activateBufferedTurnIfReady = (
+  session: RunSession,
+  runtime: SessionRuntime,
+  deps: WsDependencies,
+  turnId: string
+) => {
+  const turnRuntime = runtime.turns.get(turnId);
+  const turn = turnById(session, turnId);
+  if (!turnRuntime || !turn || !turnRuntime.metadata) {
+    return;
+  }
+  if (!turnRuntime.emittedSegment) {
+    emitSegment(runtime, turn.plan, turnRuntime.metadata);
+    turnRuntime.emittedSegment = true;
+  }
+  for (const chunk of turnRuntime.bufferedChunks.slice(turnRuntime.flushedBufferedCount)) {
+    sendChunk(runtime, buildChunkPayload(turn.plan, chunk));
+    deps.schedulerService.recordEmittedChunk(session, turnId);
+    turnRuntime.flushedBufferedCount += 1;
+  }
+};
+
+const maybeActivateNext = (
+  session: RunSession,
+  runtime: SessionRuntime,
+  deps: WsDependencies
+) => {
+  if (session.scheduler.slots.activeTurnId) {
+    return;
+  }
+  const nextTurnId = deps.schedulerService.activateNextTurn(session);
+  if (!nextTurnId) {
+    return;
+  }
+  activateBufferedTurnIfReady(session, runtime, deps, nextTurnId);
+};
+
+const finalizeTurn = (
+  session: RunSession,
+  runtime: SessionRuntime,
+  deps: WsDependencies,
+  turnId: string,
+  summary: TurnStreamCompletion
+) => {
+  deps.schedulerService.finalizeTurn(session, turnId, summary);
+  const turn = turnById(session, turnId);
+  if (!turn) {
+    return;
+  }
+
+  if (session.scheduler.slots.activeTurnId === turnId) {
+    session.scheduler.slots.activeTurnId = null;
+  }
+
+  if (turn.plan.priority !== "P2") {
+    const recoveryTurnId = deps.schedulerService.maybeCreateRecovery(session, turnId);
+    if (recoveryTurnId) {
+      const recoveryTurn = turnById(session, recoveryTurnId);
+      if (recoveryTurn) {
+        emitRecoveryCreated(runtime, recoveryTurnId, recoveryTurn.plan.recoveryOfTurnId ?? "");
+        ensureTurnStreaming(session, runtime, deps, recoveryTurnId);
+      }
+    }
+  }
+
+  maybeActivateNext(session, runtime, deps);
+};
+
+const ensureTurnStreaming = async (
+  session: RunSession,
+  runtime: SessionRuntime,
+  deps: WsDependencies,
+  turnId: string
+) => {
+  if (runtime.turns.has(turnId)) {
+    activateBufferedTurnIfReady(session, runtime, deps, turnId);
+    return;
+  }
+
+  const turn = turnById(session, turnId);
+  const snapshot = session.latestSnapshot ?? session.previousSnapshot;
+  if (!turn || !snapshot) {
+    return;
+  }
+
+  const placesStartedAt = Date.now();
+  logger.info("ws.places.fetch.start", {
+    sessionId: session.sessionId,
+    turnId,
+    routeId: session.routeSelection.selectedRouteId
+  });
+  const places = await deps.placeService.getCandidates(snapshot, session.routeSelection);
+  logger.info("ws.places.fetch.done", {
+    sessionId: session.sessionId,
+    turnId,
+    placeCount: places.length,
+    durationMs: Date.now() - placesStartedAt
+  });
+
+  const newsStartedAt = Date.now();
+  logger.info("ws.news.fetch.start", {
+    sessionId: session.sessionId,
+    turnId,
+    categories: session.preferences.newsCategories
+  });
+  const news = await deps.newsService.getCandidates(session.preferences);
+  logger.info("ws.news.fetch.done", {
+    sessionId: session.sessionId,
+    turnId,
+    newsCount: news.length,
+    durationMs: Date.now() - newsStartedAt
+  });
+
+  const playbackStartedAt = Date.now();
+  logger.info("ws.gemini.playback.start", {
+    sessionId: session.sessionId,
+    turnId,
+    turnType: turn.plan.turnType,
+    priority: turn.plan.priority,
+    triggerType: turn.plan.triggerType
+  });
+
+  const callbacks: TurnStreamCallbacks<PlaybackSegment> = {
+    onSegmentReady(metadata) {
+      deps.schedulerService.markStreamReady(session, turnId, metadata.transcriptPreview);
+      const turnRuntime = runtime.turns.get(turnId);
+      if (!turnRuntime) {
+        return;
+      }
+      turnRuntime.metadata = metadata;
+      if (session.scheduler.slots.activeTurnId === turnId) {
+        emitSegment(runtime, turn.plan, metadata);
+        turnRuntime.emittedSegment = true;
+        logger.info("ws.turn.emit.start", {
+          sessionId: session.sessionId,
+          turnId,
+          priority: turn.plan.priority,
+          turnType: turn.plan.turnType
+        });
+      }
+    },
+    onChunk(chunk) {
+      const currentTurn = turnById(session, turnId);
+      const turnRuntime = runtime.turns.get(turnId);
+      if (!currentTurn || !turnRuntime) {
+        return;
+      }
+
+      if (currentTurn.status === "superseded" || currentTurn.status === "abandoned") {
+        deps.schedulerService.recordDroppedChunk(session, turnId);
+        turnRuntime.droppedChunks += 1;
+        return;
+      }
+
+      if (session.scheduler.slots.activeTurnId === turnId && turnRuntime.emittedSegment) {
+        sendChunk(runtime, buildChunkPayload(currentTurn.plan, chunk));
+        deps.schedulerService.recordEmittedChunk(session, turnId);
+        return;
+      }
+
+      turnRuntime.bufferedChunks.push(chunk);
+      deps.schedulerService.recordBufferedChunk(session, turnId);
+    },
+    onComplete(summary) {
+      logger.info("ws.gemini.playback.done", {
+        sessionId: session.sessionId,
+        turnId,
+        durationMs: Date.now() - playbackStartedAt,
+        chunkCount: summary.chunkCount,
+        transcriptLength: summary.transcriptPreview.length
+      });
+      finalizeTurn(session, runtime, deps, turnId, summary);
+      deps.sessionService.save(session);
+    },
+    onError(error) {
+      logger.warn("ws.gemini.playback.failed", {
+        sessionId: session.sessionId,
+        turnId,
+        message: error.message
+      });
+      sendError(runtime.socket, "live_playback_failed", error.message, true, "provider");
+    }
+  };
+
+  const runtimeTurn: RuntimeTurnState = {
+    handle: {
+      cancel() {},
+      completed: Promise.resolve({
+        transcriptPreview: "",
+        estimatedPlaybackMs: 0,
+        chunkCount: 0
+      })
+    },
+    metadata: null,
+    bufferedChunks: [],
+    emittedSegment: false,
+    flushedBufferedCount: 0,
+    droppedChunks: 0,
+    places,
+    news,
+    completed: false
+  };
+  runtime.turns.set(turnId, runtimeTurn);
+
+  const handle = deps.geminiAdapter.streamPlayback(turn.plan, session, places, news, callbacks);
+  runtimeTurn.handle = handle;
+
+  void handle.completed.catch(() => {
+    // Error path is reported via callbacks.onError.
+  });
+};
+
+const applyMutation = async (
+  session: RunSession,
+  runtime: SessionRuntime,
+  deps: WsDependencies,
+  mutation: ReturnType<WsDependencies["schedulerService"]["handleSnapshot"]> | ReturnType<WsDependencies["schedulerService"]["handleUserInterrupt"]>
+) => {
+  if (mutation.supersededTurnId && mutation.activatedTurnId) {
+    emitSupersede(runtime, mutation.supersededTurnId, mutation.activatedTurnId);
+    cancelTurnRuntime(runtime, mutation.supersededTurnId);
+  }
+
+  for (const turnId of mutation.createdTurnIds) {
+    await ensureTurnStreaming(session, runtime, deps, turnId);
+  }
+
+  if (mutation.activatedTurnId) {
+    activateBufferedTurnIfReady(session, runtime, deps, mutation.activatedTurnId);
+  }
+
+  deps.sessionService.save(session);
 };
 
 export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, raw: string) => {
@@ -124,18 +416,13 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
     const session = deps.sessionService.get(requestedSessionId) ?? (resumeToken ? deps.sessionService.getByResumeToken(resumeToken) : undefined);
 
     if (!session) {
-      socket.send(JSON.stringify({
-        type: "error",
-        payload: {
-          code: "session_not_found",
-          message: "Run session not found."
-        }
-      }));
+      sendError(socket, "session_not_found", "Run session not found.", false, "ws");
       return;
     }
 
     const sessionId = session.sessionId;
     sessionIdForLog = sessionId;
+    const runtime = getRuntime(sessionId, socket);
     stage = `message.dispatch.${message.type}`;
     logger.info("ws.message.received", {
       type: message.type,
@@ -149,22 +436,14 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           deps.sessionService.save(session);
         }
         deps.sessionService.setStatus(sessionId, "active");
-        logger.info("ws.session.ready", {
+        emit(socket, "session.ready", {
           sessionId,
+          status: "active",
           openingSpeaker: session.openingSpeaker
         });
-        socket.send(JSON.stringify({
-          type: "session.ready",
-          payload: {
-            sessionId,
-            status: "active",
-            openingSpeaker: session.openingSpeaker
-          }
-        }));
         break;
       }
       case "context.snapshot": {
-        stage = "context.snapshot.validate";
         const parsed = contextSnapshotSchema.safeParse(payload);
         if (!parsed.success) {
           throw new Error("Invalid context.snapshot payload");
@@ -173,144 +452,30 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           sessionId,
           elapsedSeconds: parsed.data.motion.elapsedSeconds,
           offRoute: parsed.data.nav.offRoute,
-          approachingManeuver: parsed.data.nav.approachingManeuver,
-          quietModeEnabled: session.preferences.quietModeEnabled,
-          quietModeUntil: session.preferences.quietModeUntil
+          approachingManeuver: parsed.data.nav.approachingManeuver
         });
-        stage = "context.snapshot.persist_snapshot";
-        session.latestSnapshot = parsed.data;
-        deps.sessionService.save(session);
-        stage = "context.snapshot.create_checkpoint";
+
         const checkpoint = deps.checkpointService.createCheckpoint(session);
         logger.info("ws.checkpoint.created", {
           sessionId,
           checkpointCount: session.checkpoints.length,
           resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`
         });
-        stage = "context.snapshot.create_plan";
-        const plan = deps.routerService.createPlan(session, parsed.data);
-        if (plan) {
-          logger.info("ws.turn.plan.created", {
-            sessionId,
-            turnId: plan.turnId,
-            speaker: plan.speaker,
-            reason: plan.reason,
-            buckets: plan.contentBuckets,
-            targetDurationSeconds: plan.targetDurationSeconds
-          });
-          deps.sessionService.save(session);
-          stage = "context.snapshot.fetch_places";
-          const placesStartedAt = Date.now();
-          logger.info("ws.places.fetch.start", {
-            sessionId,
-            turnId: plan.turnId,
-            routeId: session.routeSelection.selectedRouteId
-          });
-          const places = await deps.placeService.getCandidates(parsed.data, session.routeSelection);
-          logger.info("ws.places.fetch.done", {
-            sessionId,
-            turnId: plan.turnId,
-            placeCount: places.length,
-            durationMs: Date.now() - placesStartedAt
-          });
-          stage = "context.snapshot.fetch_news";
-          const newsStartedAt = Date.now();
-          logger.info("ws.news.fetch.start", {
-            sessionId,
-            turnId: plan.turnId,
-            categories: session.preferences.newsCategories
-          });
-          const news = await deps.newsService.getCandidates(session.preferences);
-          logger.info("ws.news.fetch.done", {
-            sessionId,
-            turnId: plan.turnId,
-            newsCount: news.length,
-            durationMs: Date.now() - newsStartedAt
-          });
-          logger.info("ws.turn.composition.started", {
-            sessionId,
-            turnId: plan.turnId,
-            placeCount: places.length,
-            newsCount: news.length,
-            buckets: plan.contentBuckets
-          });
-          stage = "context.snapshot.compose_playback";
-          const playbackStartedAt = Date.now();
-          logger.info("ws.gemini.playback.start", {
-            sessionId,
-            turnId: plan.turnId,
-            speaker: plan.speaker,
-            buckets: plan.contentBuckets,
-            placeCount: places.length,
-            newsCount: news.length
-          });
-          let segment: GeneratedAudioMessage<PlaybackSegment>;
-          try {
-            segment = await deps.geminiAdapter.composePlayback(plan, session, places, news);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.warn("ws.gemini.playback.failed", {
-              sessionId,
-              turnId: plan.turnId,
-              speaker: plan.speaker,
-              message
-            });
-            sendError(socket, "live_playback_failed", message);
-            break;
-          }
-          logger.info("ws.gemini.playback.done", {
-            sessionId,
-            turnId: plan.turnId,
-            durationMs: Date.now() - playbackStartedAt,
-            chunkCount: segment.audioChunks.length,
-            transcriptLength: segment.transcriptPreview.length
-          });
-          logger.info("ws.turn.generated", {
-            sessionId,
-            turnId: plan.turnId,
-            speaker: plan.speaker,
-            reason: plan.reason,
-            buckets: plan.contentBuckets
-          });
-          stage = "context.snapshot.emit_turn";
-          logger.info("ws.turn.emit.start", {
-            sessionId,
-            turnId: plan.turnId,
-            eventType: "playback.segment"
-          });
-          socket.send(JSON.stringify({ type: "turn.plan", payload: plan }));
-          sendSegmentWithAudio(socket, sessionId, "playback.segment", segment);
-        } else {
-          logger.info("ws.turn.skipped", {
-            sessionId,
-            reason: "router_returned_null",
-            quietModeEnabled: session.preferences.quietModeEnabled,
-            quietModeUntil: session.preferences.quietModeUntil,
-            offRoute: parsed.data.nav.offRoute,
-            approachingManeuver: parsed.data.nav.approachingManeuver
-          });
-        }
 
-        stage = "context.snapshot.reconnect_check";
+        const mutation = deps.schedulerService.handleSnapshot(session, parsed.data);
+        await applyMutation(session, runtime, deps, mutation);
+
         if (!session.reconnectIssued && parsed.data.motion.elapsedSeconds >= 1800) {
           session.reconnectIssued = true;
           deps.sessionService.setStatus(sessionId, "reconnecting");
           deps.sessionService.save(session);
-          logger.warn("ws.session.reconnect_required", {
+          emit(socket, "session.reconnect_required", {
             sessionId,
-            resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`
+            status: "reconnecting",
+            resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`,
+            reason: "live_session_rollover"
           });
-          socket.send(JSON.stringify({
-            type: "session.reconnect_required",
-            payload: {
-              sessionId,
-              status: "reconnecting",
-              resumeToken: checkpoint.resumeToken ?? `resume_${sessionId}`,
-              reason: "live_session_rollover"
-            }
-          }));
         }
-        stage = "done";
         break;
       }
       case "quick_action": {
@@ -321,24 +486,52 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           action: String(payload.action ?? "")
         });
         if (payload.action === "repeat" && session.lastTurnAt) {
-          sendSegmentWithAudio(
-            socket,
-            sessionId,
-            "playback.filler",
-            createGeneratedAudioMessage({
-              turnId: `filler_${randomUUID()}`,
-              speaker: session.currentSpeaker,
-              segmentType: "filler",
-              transcriptPreview: "Repeating the last point in a tighter version.",
-              estimatedPlaybackMs: 1800,
-              audioFormat: PATHLY_AUDIO_FORMAT
-            })
-          );
+          const filler: GeneratedAudioMessage<PlaybackFiller> = createGeneratedAudioMessage({
+            turnId: `filler_${randomUUID()}`,
+            speaker: session.currentSpeaker,
+            segmentType: "filler",
+            turnType: "filler",
+            priority: "P2",
+            supersedesTurnId: null,
+            recoveryOfTurnId: null,
+            timestamp: new Date().toISOString(),
+            transcriptPreview: "Repeating the last point in a tighter version.",
+            estimatedPlaybackMs: 1800,
+            audioFormat: PATHLY_AUDIO_FORMAT
+          });
+          emit(socket, "playback.filler", {
+            turnId: filler.turnId,
+            speaker: filler.speaker,
+            segmentType: filler.segmentType,
+            turnType: filler.turnType,
+            priority: filler.priority,
+            supersedesTurnId: filler.supersedesTurnId,
+            recoveryOfTurnId: filler.recoveryOfTurnId,
+            timestamp: filler.timestamp,
+            transcriptPreview: filler.transcriptPreview,
+            estimatedPlaybackMs: filler.estimatedPlaybackMs,
+            audioFormat: filler.audioFormat
+          });
+          filler.audioChunks.forEach((audioBase64, chunkIndex) => {
+            emit(socket, "playback.audio.chunk", {
+              turnId: filler.turnId,
+              speaker: filler.speaker,
+              segmentType: filler.segmentType,
+              turnType: filler.turnType,
+              priority: filler.priority,
+              supersedesTurnId: filler.supersedesTurnId,
+              recoveryOfTurnId: filler.recoveryOfTurnId,
+              timestamp: new Date().toISOString(),
+              chunkIndex,
+              audioBase64,
+              isFinalChunk: chunkIndex === filler.audioChunks.length - 1
+            });
+          });
         }
         break;
       }
       case "interrupt.text": {
-        const text = String(payload.text ?? "");
+        const text = String(payload.text ?? "").trim();
         if (/less news/i.test(text)) {
           session.quickActionBias.local_context = (session.quickActionBias.local_context ?? 0) + 2;
           session.quickActionBias.news = 0;
@@ -347,42 +540,16 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
           session.preferences.quietModeEnabled = true;
           session.preferences.quietModeUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
         }
-        const intent = /less|more|quiet|talk/i.test(text) ? "preference_change" : "question";
-        deps.sessionService.save(session);
-        logger.info("ws.interrupt.text", {
-          sessionId,
-          intent
-        });
-        let interruptMessage: GeneratedAudioMessage<InterruptResult>;
-        try {
-          interruptMessage = await deps.geminiAdapter.composeInterruptResult(
-            session,
-            intent,
-            intent === "preference_change"
-              ? "Got it. I updated the run settings and the next turns will follow that immediately."
-              : "I heard you. I will answer directly first, then bring the show back in cleanly."
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn("ws.gemini.interrupt.failed", {
-            sessionId,
-            intent,
-            message
-          });
-          sendError(socket, "live_playback_failed", message);
-          break;
-        }
-        sendSegmentWithAudio(
-          socket,
-          sessionId,
-          "interrupt.result",
-          interruptMessage
+        const mutation = deps.schedulerService.handleUserInterrupt(
+          session,
+          text ? `User interrupted and needs an immediate spoken response: "${text}"` : "User interrupted and needs an immediate response."
         );
+        await applyMutation(session, runtime, deps, mutation);
         break;
       }
       case "interrupt.voice.start": {
         session.voiceInterruptChunks = [];
-        session.interruptedPlaybackTurnId = session.lastTurnAt;
+        session.interruptedPlaybackTurnId = session.scheduler.slots.activeTurnId;
         deps.sessionService.save(session);
         logger.info("ws.interrupt.voice.start", {
           sessionId
@@ -399,58 +566,26 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         break;
       }
       case "interrupt.voice.end": {
-        logger.info("ws.interrupt.voice.end", {
-          sessionId,
-          chunkCount: session.voiceInterruptChunks.length
-        });
-        let interruptMessage: GeneratedAudioMessage<InterruptResult>;
-        try {
-          interruptMessage = await deps.geminiAdapter.composeInterruptResult(
-            session,
-            "direct_answer",
-            "I heard the interruption and I am switching to a short direct response before resuming the show."
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn("ws.gemini.interrupt.failed", {
-            sessionId,
-            intent: "direct_answer",
-            message
-          });
-          sendError(socket, "live_playback_failed", message);
-          session.voiceInterruptChunks = [];
-          deps.sessionService.save(session);
-          break;
-        }
-        sendSegmentWithAudio(
-          socket,
-          sessionId,
-          "interrupt.result",
-          interruptMessage
+        const mutation = deps.schedulerService.handleUserInterrupt(
+          session,
+          "User interrupted by voice and needs a short immediate spoken response before the show continues."
         );
+        await applyMutation(session, runtime, deps, mutation);
         session.voiceInterruptChunks = [];
         deps.sessionService.save(session);
         break;
       }
       case "session.pause": {
         deps.sessionService.setStatus(sessionId, "paused");
-        logger.info("ws.session.paused", {
-          sessionId
-        });
         break;
       }
       case "session.resume": {
         deps.sessionService.setStatus(sessionId, "active");
-        logger.info("ws.session.resumed", {
-          sessionId
-        });
         break;
       }
       case "session.end": {
         deps.sessionService.setStatus(sessionId, "ended");
-        logger.info("ws.session.ended", {
-          sessionId
-        });
+        runtimes.delete(sessionId);
         break;
       }
       case "session.preferences.update": {
@@ -460,26 +595,14 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
         }
         deps.sessionService.updatePreferences(sessionId, parsed.data);
         const updatedSession = deps.sessionService.get(sessionId);
-        logger.info("ws.session.preferences.updated", {
+        emit(socket, "session.preferences.updated", {
           sessionId,
-          talkDensity: parsed.data.talkDensity,
-          quietModeEnabled: parsed.data.quietModeEnabled
+          preferences: updatedSession?.preferences ?? parsed.data
         });
-        socket.send(JSON.stringify({
-          type: "session.preferences.updated",
-          payload: {
-            sessionId,
-            preferences: updatedSession?.preferences ?? parsed.data
-          }
-        }));
         break;
       }
       default:
-        logger.warn("ws.message.unsupported", {
-          sessionId,
-          type: message.type
-        });
-      sendError(socket, "unsupported_event", `Unsupported websocket event: ${message.type}`);
+        sendError(socket, "unsupported_event", `Unsupported websocket event: ${message.type}`, false, "ws");
     }
   } catch (error) {
     logger.error("ws.message.error", {
@@ -491,7 +614,9 @@ export const handleWsMessage = async (socket: SocketLike, deps: WsDependencies, 
     sendError(
       socket,
       "invalid_message",
-      error instanceof Error ? error.message : "Invalid websocket message"
+      error instanceof Error ? error.message : "Invalid websocket message",
+      false,
+      "ws"
     );
   }
 };
