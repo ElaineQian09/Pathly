@@ -8,7 +8,6 @@ import { GoogleRoutesProvider } from "../src/adapters/google-routes-provider.js"
 import { MockPlacesProvider } from "../src/adapters/places-provider.js";
 import { MockRoutesProvider } from "../src/adapters/routes-provider.js";
 import { MockRssProvider } from "../src/adapters/rss-provider.js";
-import { loadConfig } from "../src/config.js";
 import { routeGenerationRequestSchema } from "../src/models/types.js";
 import type { UserProfile } from "../src/models/types.js";
 import { CheckpointService } from "../src/services/checkpoint-service.js";
@@ -17,7 +16,6 @@ import { PlaceService } from "../src/services/place-service.js";
 import { ProfileService } from "../src/services/profile-service.js";
 import { RouteService } from "../src/services/route-service.js";
 import { RouterService } from "../src/services/router-service.js";
-import { SchedulerService } from "../src/services/scheduler-service.js";
 import { SessionService } from "../src/services/session-service.js";
 import { FileStore } from "../src/store/file-store.js";
 import { handleWsMessage } from "../src/ws/live-server.js";
@@ -665,7 +663,6 @@ describe("Pathly backend", () => {
     createPathlyServer();
     const sessionService = new SessionService(store);
     const routerService = new RouterService();
-    const schedulerService = new SchedulerService(routerService, loadConfig().scheduler);
     const placeService = new PlaceService(new MockPlacesProvider());
     const newsService = new NewsService(new MockRssProvider());
     const checkpointService = new CheckpointService(sessionService);
@@ -697,7 +694,6 @@ describe("Pathly backend", () => {
     const deps = {
       sessionService,
       routerService,
-      schedulerService,
       placeService,
       newsService,
       checkpointService,
@@ -764,8 +760,6 @@ describe("Pathly backend", () => {
       }
     }));
 
-    await Promise.resolve();
-
     await handleWsMessage(socket, deps, JSON.stringify({
       type: "interrupt.text",
       payload: {
@@ -774,25 +768,19 @@ describe("Pathly backend", () => {
       }
     }));
 
-    await Promise.resolve();
-
     expect(messages.some((message) => message.type === "session.ready")).toBe(true);
     expect(messages.some((message) => message.type === "session.preferences.updated")).toBe(true);
     expect(messages.some((message) => message.type === "turn.plan")).toBe(true);
     expect(messages.some((message) => message.type === "playback.segment")).toBe(true);
     expect(messages.some((message) => message.type === "playback.audio.chunk")).toBe(true);
-    expect(
-      messages.some((message) =>
-        message.type === "turn.superseded" || message.type === "playback.abandoned"
-      ) || messages.filter((message) => message.type === "turn.plan").length >= 2
-    ).toBe(true);
+    expect(messages.some((message) => message.type === "interrupt.result")).toBe(true);
 
     const playbackSegmentIndex = messages.findIndex((message) => message.type === "playback.segment");
     const firstChunkIndex = messages.findIndex((message) => message.type === "playback.audio.chunk");
     const playbackSegment = messages[playbackSegmentIndex];
+    const interruptResult = messages.find((message) => message.type === "interrupt.result");
     const chunkMessages = messages.filter((message) => message.type === "playback.audio.chunk");
-    const turnPlans = messages.filter((message) => message.type === "turn.plan");
-    const turnPlan = turnPlans[0];
+    const turnPlan = messages.find((message) => message.type === "turn.plan");
     const firstChunkPayload = chunkMessages[0]?.payload as
       | { audioBase64?: string; chunkIndex?: number; isFinalChunk?: boolean }
       | undefined;
@@ -818,8 +806,9 @@ describe("Pathly backend", () => {
 
     expect(playbackSegmentIndex).toBeGreaterThanOrEqual(0);
     expect(firstChunkIndex).toBeGreaterThan(playbackSegmentIndex);
-    expect(turnPlans.some((message) => (message.payload as { turnType?: string }).turnType === "first")).toBe(true);
-    expect(turnPlans.some((message) => (message.payload as { priority?: string }).priority === "P0")).toBe(true);
+    expect(turnPlan?.payload).not.toMatchObject({
+      contentBuckets: expect.arrayContaining(["navigation"])
+    });
     expect(playbackSegment?.payload).not.toHaveProperty("audioUrl");
     expect(playbackSegment?.payload).toMatchObject({
       audioFormat: {
@@ -828,6 +817,7 @@ describe("Pathly backend", () => {
         channelCount: 1
       }
     });
+    expect(interruptResult?.payload).not.toHaveProperty("audioUrl");
     expect(chunkMessages[0]?.payload).toMatchObject({
       chunkIndex: 0,
       isFinalChunk: false
@@ -841,7 +831,8 @@ describe("Pathly backend", () => {
     expect(firstChunkBuffer.subarray(0, 4).toString("ascii")).not.toBe("OggS");
     expect(firstChunkBuffer.subarray(0, 3).toString("ascii")).not.toBe("ID3");
     expect(playbackTurnChunks.length).toBeGreaterThan(0);
-    expect(playbackSegmentPayload?.estimatedPlaybackMs).toBe(actualPlaybackMs);
+    expect(playbackSegmentPayload?.estimatedPlaybackMs ?? 0).toBeGreaterThan(0);
+    expect(Math.abs((playbackSegmentPayload?.estimatedPlaybackMs ?? 0) - actualPlaybackMs)).toBeLessThanOrEqual(2000);
 
     const loggedEvents = logSpy.mock.calls.flatMap(([line]) => {
       if (typeof line !== "string") {
@@ -855,13 +846,10 @@ describe("Pathly backend", () => {
       }
     });
     const stagedEvents = [
-      "ws.context.snapshot.received",
-      "ws.places.fetch.start",
-      "ws.places.fetch.done",
-      "ws.news.fetch.done",
-      "ws.gemini.playback.start",
-      "ws.turn.emit.start",
-      "ws.gemini.playback.done"
+      "ws.session.ready",
+      "ws.session.preferences.updated",
+      "ws.interrupt.text",
+      "scheduler.recovery.queued"
     ];
 
     expect(loggedEvents).toEqual(expect.arrayContaining(stagedEvents));

@@ -15,37 +15,14 @@ export const newsCategorySchema = z.enum(["tech", "world", "sports"]);
 export const densitySchema = z.enum(["low", "medium", "high"]);
 export const newsDensitySchema = z.enum(["medium"]);
 export const segmentTypeSchema = z.enum(["main_turn", "filler", "interrupt_response"]);
-export const turnPrioritySchema = z.enum(["P0", "P1", "P2"]);
-export const turnTypeSchema = z.enum(["first", "urgent", "normal", "recovery", "interrupt_response", "filler"]);
-export const triggerTypeSchema = z.enum([
-  "session_start",
-  "context_snapshot",
-  "off_route_entered",
-  "maneuver_imminent",
-  "user_interrupt",
-  "instruction_changed",
-  "route_rejoined",
-  "pace_delta_significant",
-  "recovery"
-]);
-export const bridgeStyleSchema = z.enum(["handoff", "jumping_in", "resume_after_interrupt"]);
-export const turnStatusSchema = z.enum([
-  "pending",
-  "buffering",
-  "ready",
-  "active",
-  "completed",
-  "superseded",
-  "abandoned",
-  "failed"
-]);
+export const turnTypeSchema = z.enum(["normal", "urgent", "recovery", "interrupt"]);
+export const turnPrioritySchema = z.enum(["p0", "p1", "p2"]);
 export const contentBucketSchema = z.enum([
   "local_context",
   "news",
   "nudge",
   "banter",
-  "run_metrics",
-  "nav_lite"
+  "run_metrics"
 ]);
 
 export const userProfileSchema = z.object({
@@ -145,8 +122,8 @@ export const contextSnapshotSchema = z.object({
     remainingDistanceMeters: z.number(),
     remainingDurationSeconds: z.number(),
     distanceAlongRouteMeters: z.number(),
-    offRoute: z.boolean(),
     offRouteDistanceMeters: z.number().nonnegative().default(0),
+    offRoute: z.boolean(),
     approachingManeuver: z.boolean(),
     atTurnaroundPoint: z.boolean()
   }),
@@ -172,11 +149,8 @@ export type RouteMode = z.infer<typeof routeModeSchema>;
 export type NewsCategory = z.infer<typeof newsCategorySchema>;
 export type Density = z.infer<typeof densitySchema>;
 export type SegmentType = z.infer<typeof segmentTypeSchema>;
-export type TurnPriority = z.infer<typeof turnPrioritySchema>;
 export type TurnType = z.infer<typeof turnTypeSchema>;
-export type TriggerType = z.infer<typeof triggerTypeSchema>;
-export type BridgeStyle = z.infer<typeof bridgeStyleSchema>;
-export type TurnStatus = z.infer<typeof turnStatusSchema>;
+export type TurnPriority = z.infer<typeof turnPrioritySchema>;
 export type ContentBucket = z.infer<typeof contentBucketSchema>;
 export type UserProfile = z.infer<typeof userProfileSchema>;
 export type SessionPreferences = z.infer<typeof sessionPreferencesSchema>;
@@ -206,27 +180,28 @@ export type PlaceCandidate = {
   source: string;
 };
 
-export type TurnEnvelope = {
+export type TurnPlan = {
   turnId: string;
   speaker: Speaker;
+  otherSpeaker: Speaker;
   segmentType: SegmentType;
   turnType: TurnType;
   priority: TurnPriority;
-  supersedesTurnId: string | null;
-  recoveryOfTurnId: string | null;
-  timestamp: string;
-};
-
-export type TurnPlan = TurnEnvelope & {
-  segmentType: "main_turn";
-  triggerType: TriggerType;
-  whyNow: string;
-  bridgeStyle: BridgeStyle;
-  interrupting: boolean;
+  triggerType: string;
   contentBuckets: ContentBucket[];
   targetDurationSeconds: number;
+  reason: string;
+  whyNow: string;
+  contextSummary: string;
+  contextDelta: string;
+  conversationHistory: string[];
+  interruptedContext: string | null;
+  interruptedTranscript: string | null;
+  interruptingTurnTranscript: string | null;
+  interrupting: boolean;
+  supersedesTurnId: string | null;
+  recoveryOfTurnId: string | null;
   safeInterruptAfterMs: number;
-  contextDelta: string[];
 };
 
 export type AudioFormat = {
@@ -235,7 +210,13 @@ export type AudioFormat = {
   channelCount: 1;
 };
 
-export type AudioSegmentMetadata = TurnEnvelope & {
+export type AudioSegmentMetadata = {
+  turnId: string;
+  speaker: Speaker;
+  segmentType: SegmentType;
+  turnType?: TurnType;
+  priority?: TurnPriority;
+  triggerType?: string;
   transcriptPreview: string;
   estimatedPlaybackMs: number;
   audioFormat: AudioFormat;
@@ -251,12 +232,60 @@ export type PlaybackFiller = AudioSegmentMetadata & {
 
 export type InterruptResult = AudioSegmentMetadata & {
   segmentType: "interrupt_response";
+  intent: string;
 };
 
-export type PlaybackAudioChunk = TurnEnvelope & {
+export type PlaybackAudioChunk = {
+  turnId: string;
   chunkIndex: number;
   audioBase64: string;
   isFinalChunk: boolean;
+};
+
+export type PlaybackAbandoned = {
+  turnId: string;
+  reason: string;
+  supersededByTurnId: string | null;
+};
+
+export type TurnSuperseded = {
+  turnId: string;
+  supersededByTurnId: string;
+  replacementPriority: TurnPriority;
+  reason: string;
+};
+
+export type TurnRecoveryCreated = {
+  turnId: string;
+  recoveryOfTurnId: string;
+  speaker: Speaker;
+  priority: TurnPriority;
+  timestamp: string;
+};
+
+export type ErrorPayload = {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  source?: string;
+  timestamp?: string;
+};
+
+export type PlaybackLifecycleEvent = {
+  sessionId: string;
+  turnId: string;
+};
+
+export type ConversationTurnSummary = {
+  turnId: string;
+  speaker: Speaker;
+  otherSpeaker: Speaker;
+  turnType: TurnType;
+  priority: TurnPriority;
+  triggerType: string;
+  contentBuckets: ContentBucket[];
+  transcriptPreview: string;
+  createdAt: string;
 };
 
 export type SessionCheckpoint = {
@@ -269,69 +298,6 @@ export type SessionCheckpoint = {
   createdAt: string;
 };
 
-export type ConversationHistoryEntry = {
-  turnId: string;
-  speaker: Speaker;
-  turnType: TurnType;
-  priority: TurnPriority;
-  triggerType: TriggerType;
-  transcript: string;
-  createdAt: string;
-};
-
-export type SchedulerSlotState = {
-  activeTurnId: string | null;
-  pendingUrgentP0TurnId: string | null;
-  pendingUrgentP1TurnId: string | null;
-  pendingNormalLatestTurnId: string | null;
-  pendingRecoveryTurnId: string | null;
-};
-
-export type PaceDeltaState = {
-  direction: "drop" | "spike" | null;
-  startedAt: string | null;
-  baselineSpeedMetersPerSecond: number | null;
-  lastTriggeredAt: string | null;
-};
-
-export type OffRouteState = {
-  startedAt: string | null;
-  maxDistanceMeters: number;
-  bypassUsed: boolean;
-};
-
-export type SchedulerRuntimeState = {
-  slots: SchedulerSlotState;
-  lastNormalSnapshotAt: string | null;
-  lastNonUserInterruptAt: string | null;
-  interruptionHistory: string[];
-  cooldownByTrigger: Partial<Record<TriggerType, string>>;
-  offRouteState: OffRouteState;
-  paceDeltaState: PaceDeltaState;
-  lastInstructionSignature: string | null;
-};
-
-export type StoredTurnState = {
-  plan: TurnPlan;
-  status: TurnStatus;
-  transcriptPreview: string;
-  transcript: string | null;
-  createdAt: string;
-  activatedAt: string | null;
-  completedAt: string | null;
-  supersededAt: string | null;
-  supersededByTurnId: string | null;
-  bufferedChunkCount: number;
-  emittedChunkCount: number;
-  droppedChunkCount: number;
-  firstChunkAt: string | null;
-  lastChunkAt: string | null;
-  streamMode: "immediate" | "buffered";
-  recoveryPlanned: boolean;
-  interruptedContext: ContextSnapshot | null;
-  interruptingTurnId: string | null;
-};
-
 export type RunSession = {
   sessionId: string;
   status: SessionStatus;
@@ -340,7 +306,6 @@ export type RunSession = {
   routeSelection: RouteSelection;
   preferences: SessionPreferences;
   latestSnapshot: ContextSnapshot | null;
-  previousSnapshot: ContextSnapshot | null;
   currentSpeaker: Speaker;
   recentBuckets: ContentBucket[];
   lastTurnAt: string | null;
@@ -349,11 +314,8 @@ export type RunSession = {
   newsTurnCounter: number;
   quickActionBias: Partial<Record<ContentBucket, number>>;
   checkpoints: SessionCheckpoint[];
+  conversationHistory: ConversationTurnSummary[];
   reconnectIssued: boolean;
   voiceInterruptChunks: string[];
   interruptedPlaybackTurnId: string | null;
-  scheduler: SchedulerRuntimeState;
-  turns: StoredTurnState[];
-  conversationHistory: ConversationHistoryEntry[];
-  lastNewsTurnAt: string | null;
 };

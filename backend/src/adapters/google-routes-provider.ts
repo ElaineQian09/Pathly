@@ -341,7 +341,7 @@ export class GoogleRoutesProvider {
   ): Promise<ComputeRoutesResponse> {
     const fieldMask = options?.fieldMask ?? BASE_ROUTE_FIELD_MASK;
     const requestsPolyline = fieldMask.includes("routes.polyline");
-    logger.info("routes.compute.request", {
+    logger.debug("routes.compute.request", {
       requestKind: options?.requestKind ?? "base_route",
       travelMode: options?.travelMode ?? "WALK",
       routingPreference: options?.routingPreference ?? null,
@@ -390,7 +390,7 @@ export class GoogleRoutesProvider {
 
     await requireOk(response, "Google Routes API");
     const body = (await response.json()) as ComputeRoutesResponse;
-    logger.info("routes.compute.response", {
+    logger.debug("routes.compute.response", {
       requestKind: options?.requestKind ?? "base_route",
       routeCount: body.routes?.length ?? 0,
       hasPolyline: Boolean(body.routes?.[0]?.polyline?.encodedPolyline),
@@ -406,7 +406,7 @@ export class GoogleRoutesProvider {
     error: unknown
   ) {
     if (error instanceof HttpError) {
-      logger.warn(event, {
+      logger.debug(event, {
         ...fields,
         reason: error.message,
         httpStatus: error.status,
@@ -418,7 +418,7 @@ export class GoogleRoutesProvider {
       return;
     }
 
-    logger.warn(event, {
+    logger.debug(event, {
       ...fields,
       reason: error instanceof Error ? error.message : String(error)
     });
@@ -459,7 +459,7 @@ export class GoogleRoutesProvider {
         longitude
       }));
 
-      logger.info("routes.guidance.anchors", {
+      logger.debug("routes.guidance.anchors", {
         routeId: candidate.routeId,
         originalPolylinePointCount: originalPoints.length,
         anchorCount: anchors.length,
@@ -486,7 +486,7 @@ export class GoogleRoutesProvider {
         const lengthDeltaRatio = Math.abs(guidanceDistanceMeters - candidate.distanceMeters) / candidate.distanceMeters;
         const maxOffset = maxLateralOffsetMeters(originalPoints, guidancePoints);
 
-        logger.info("routes.guidance.validation", {
+        logger.debug("routes.guidance.validation", {
           routeId: candidate.routeId,
           anchorCount: anchors.length,
           guidanceDistanceMeters,
@@ -593,7 +593,7 @@ export class GoogleRoutesProvider {
           const routeToken = route.routeToken ?? null;
 
           if (!routeToken) {
-            logger.info("routes.route_token.unavailable", {
+            logger.debug("routes.route_token.unavailable", {
               routeMode,
               candidateIndex: index,
               travelMode: "WALK",

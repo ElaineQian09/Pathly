@@ -25,13 +25,25 @@ const getErrorDetails = (error: unknown) => ({
   stack: error instanceof Error ? error.stack : undefined
 });
 
+const buildErrorPayload = (
+  code: string,
+  message: string,
+  options: { retryable?: boolean; source?: string } = {}
+) => ({
+  code,
+  message,
+  retryable: options.retryable ?? false,
+  source: options.source ?? "http",
+  timestamp: new Date().toISOString()
+});
+
 export const buildApp = ({ baseUrl, profileService, routeService, sessionService }: AppServices) => {
   const app = express();
   app.use(express.json());
   app.use((request, response, next) => {
     const startedAt = Date.now();
     response.on("finish", () => {
-      logger.info("http.request", {
+      logger.debug("http.request", {
         method: request.method,
         path: request.path,
         statusCode: response.statusCode,
@@ -60,7 +72,11 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       });
       response.status(400).json({
         ok: false,
-        error: parsed.error.flatten()
+        error: buildErrorPayload("invalid_profile", "Profile payload did not match the contract.", {
+          retryable: false,
+          source: "http"
+        }),
+        issues: parsed.error.flatten()
       });
       return;
     }
@@ -82,7 +98,11 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       });
       response.status(400).json({
         ok: false,
-        error: parsed.error.flatten()
+        error: buildErrorPayload("invalid_route_generation_request", "Route generation payload did not match the contract.", {
+          retryable: false,
+          source: "http"
+        }),
+        issues: parsed.error.flatten()
       });
       return;
     }
@@ -162,7 +182,11 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
       });
       response.status(400).json({
         ok: false,
-        error: parsed.error.flatten()
+        error: buildErrorPayload("invalid_session_request", "Session creation payload did not match the contract.", {
+          retryable: false,
+          source: "http"
+        }),
+        issues: parsed.error.flatten()
       });
       return;
     }
@@ -199,9 +223,10 @@ export const buildApp = ({ baseUrl, profileService, routeService, sessionService
     });
     response.status(500).json({
       ok: false,
-      error: {
-        message: details.message
-      }
+      error: buildErrorPayload("backend_error", details.message, {
+        retryable: false,
+        source: "http"
+      })
     });
   });
 

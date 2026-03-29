@@ -12,21 +12,15 @@ export type AppConfig = {
   geminiLiveAudioTimeoutMs: number;
   baseUrl: string;
   scheduler: {
-    normalSnapshotIntervalMs: number;
-    nonUserInterruptMinIntervalMs: number;
-    interruptBudgetWindowMs: number;
-    interruptBudgetMax: number;
-    p0CooldownMs: number;
-    p1CooldownMs: number;
-    offRouteBypassMinDurationMs: number;
-    offRouteBypassMinDistanceMeters: number;
-    activeTurnNoInterruptAfterProgress: number;
-    maneuverImminentWindowSeconds: number;
-    paceDeltaDebounceMs: number;
-    routeRejoinedMinOffRouteMs: number;
-    instructionChangeMinChars: number;
-    paceDropSpeedMetersPerSecond: number;
-    paceSpikeSpeedMetersPerSecond: number;
+    maxInterruptBudget: number;
+    interruptWindowMs: number;
+    minInterruptIntervalMs: number;
+    p0TriggerCooldownMs: number;
+    p1TriggerCooldownMs: number;
+    maneuverImminentSeconds: number;
+    offRouteConfirmSeconds: number;
+    offRouteBypassDistanceMeters: number;
+    routeRejoinedConfirmSeconds: number;
   };
 };
 
@@ -53,21 +47,21 @@ export const loadConfig = (): AppConfig => ({
   theoVoice: process.env.THEO_VOICE ?? "Charon",
   geminiLiveAudioTimeoutMs: parsePositiveInteger(process.env.GEMINI_LIVE_AUDIO_TIMEOUT_MS, 45000),
   baseUrl: process.env.PATHLY_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
-  scheduler: {
-    normalSnapshotIntervalMs: parsePositiveInteger(process.env.PATHLY_SNAPSHOT_INTERVAL_MS, 10000),
-    nonUserInterruptMinIntervalMs: parsePositiveInteger(process.env.PATHLY_INTERRUPT_MIN_INTERVAL_MS, 45000),
-    interruptBudgetWindowMs: parsePositiveInteger(process.env.PATHLY_INTERRUPT_BUDGET_WINDOW_MS, 5 * 60 * 1000),
-    interruptBudgetMax: parsePositiveInteger(process.env.PATHLY_INTERRUPT_BUDGET_MAX, 3),
-    p0CooldownMs: parsePositiveInteger(process.env.PATHLY_P0_COOLDOWN_MS, 90000),
-    p1CooldownMs: parsePositiveInteger(process.env.PATHLY_P1_COOLDOWN_MS, 120000),
-    offRouteBypassMinDurationMs: parsePositiveInteger(process.env.PATHLY_OFF_ROUTE_BYPASS_MIN_MS, 8000),
-    offRouteBypassMinDistanceMeters: parsePositiveInteger(process.env.PATHLY_OFF_ROUTE_BYPASS_MIN_METERS, 25),
-    activeTurnNoInterruptAfterProgress: Number(process.env.PATHLY_NO_INTERRUPT_AFTER_PROGRESS ?? 0.8),
-    maneuverImminentWindowSeconds: parsePositiveInteger(process.env.PATHLY_MANEUVER_IMMINENT_WINDOW_SECONDS, 12),
-    paceDeltaDebounceMs: parsePositiveInteger(process.env.PATHLY_PACE_DELTA_DEBOUNCE_MS, 20000),
-    routeRejoinedMinOffRouteMs: parsePositiveInteger(process.env.PATHLY_ROUTE_REJOINED_MIN_OFF_ROUTE_MS, 20000),
-    instructionChangeMinChars: parsePositiveInteger(process.env.PATHLY_INSTRUCTION_CHANGE_MIN_CHARS, 8),
-    paceDropSpeedMetersPerSecond: Number(process.env.PATHLY_PACE_DROP_MPS ?? 2.2),
-    paceSpikeSpeedMetersPerSecond: Number(process.env.PATHLY_PACE_SPIKE_MPS ?? 4.6)
-  }
+  scheduler: (() => {
+    const offRouteConfirmSeconds = parsePositiveInteger(process.env.PATHLY_OFF_ROUTE_CONFIRM_SECONDS, 8);
+    return {
+      maxInterruptBudget: parsePositiveInteger(process.env.PATHLY_MAX_INTERRUPT_BUDGET, 3),
+      interruptWindowMs: parsePositiveInteger(process.env.PATHLY_INTERRUPT_WINDOW_MS, 5 * 60 * 1000),
+      minInterruptIntervalMs: parsePositiveInteger(process.env.PATHLY_MIN_INTERRUPT_INTERVAL_MS, 45 * 1000),
+      p0TriggerCooldownMs: parsePositiveInteger(process.env.PATHLY_P0_TRIGGER_COOLDOWN_MS, 90 * 1000),
+      p1TriggerCooldownMs: parsePositiveInteger(process.env.PATHLY_P1_TRIGGER_COOLDOWN_MS, 120 * 1000),
+      maneuverImminentSeconds: parsePositiveInteger(process.env.PATHLY_MANEUVER_IMMINENT_SECONDS, 12),
+      offRouteConfirmSeconds,
+      offRouteBypassDistanceMeters: parsePositiveInteger(process.env.PATHLY_OFF_ROUTE_BYPASS_DISTANCE_METERS, 25),
+      routeRejoinedConfirmSeconds: parsePositiveInteger(
+        process.env.PATHLY_ROUTE_REJOINED_CONFIRM_SECONDS,
+        Math.max(15, offRouteConfirmSeconds * 2)
+      )
+    };
+  })()
 });

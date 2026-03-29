@@ -13,7 +13,6 @@ import { PlaceService } from "./place-service.js";
 import { ProfileService } from "./profile-service.js";
 import { RouteService } from "./route-service.js";
 import { RouterService } from "./router-service.js";
-import { SchedulerService } from "./scheduler-service.js";
 import { SessionService } from "./session-service.js";
 
 export const createServices = () => {
@@ -30,7 +29,6 @@ export const createServices = () => {
   const sessionService = new SessionService(store);
   const profileService = new ProfileService(store);
   const routerService = new RouterService();
-  const schedulerService = new SchedulerService(routerService, config.scheduler);
   const checkpointService = new CheckpointService(sessionService);
   const geminiAdapter = new RealGeminiAdapter(
     config.geminiApiKey,
@@ -47,7 +45,6 @@ export const createServices = () => {
     routeService,
     sessionService,
     routerService,
-    schedulerService,
     placeService,
     newsService,
     checkpointService,

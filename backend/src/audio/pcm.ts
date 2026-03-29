@@ -192,7 +192,7 @@ const resampleTo24k = (buffer: Buffer, inputSampleRate: number) => {
   return output;
 };
 
-const chunkBuffer = (buffer: Buffer, chunkMs = DEFAULT_CHUNK_MS) => {
+export const chunkPcmBuffer = (buffer: Buffer, chunkMs = DEFAULT_CHUNK_MS) => {
   const chunkByteLength = Math.max(
     BYTES_PER_SAMPLE,
     Math.round((chunkMs / 1000) * SAMPLE_RATE_HZ * CHANNEL_COUNT * BYTES_PER_SAMPLE)
@@ -226,6 +226,24 @@ export const createGeneratedAudioMessageFromPcm = <T extends AudioMetadata>(
   pcmBuffer: Buffer,
   inputFormat: PcmAudioFormat
 ): GeneratedAudioMessage<T> => {
+  const normalizedBuffer = normalizePcmBuffer(pcmBuffer, inputFormat);
+  const actualPlaybackMs = playbackMsForBuffer(normalizedBuffer);
+  const audioChunks = chunkPcmBuffer(normalizedBuffer);
+  assertChunkRoundTrip(normalizedBuffer, audioChunks);
+  maybeDumpDebugWav(metadata.turnId, normalizedBuffer);
+
+  return {
+    ...metadata,
+    audioFormat: PATHLY_AUDIO_FORMAT,
+    estimatedPlaybackMs: actualPlaybackMs,
+    audioChunks
+  } as unknown as GeneratedAudioMessage<T>;
+};
+
+export const normalizePcmBuffer = (
+  pcmBuffer: Buffer,
+  inputFormat: PcmAudioFormat
+) => {
   if (inputFormat.channelCount < 1) {
     throw new Error(`Invalid PCM channel count: ${inputFormat.channelCount}`);
   }
@@ -236,17 +254,7 @@ export const createGeneratedAudioMessageFromPcm = <T extends AudioMetadata>(
   let normalizedBuffer = downmixToMono(pcmBuffer, inputFormat.channelCount);
   normalizedBuffer = resampleTo24k(normalizedBuffer, inputFormat.sampleRateHz);
   assertPathlyPcm(normalizedBuffer);
-  const actualPlaybackMs = playbackMsForBuffer(normalizedBuffer);
-  const audioChunks = chunkBuffer(normalizedBuffer);
-  assertChunkRoundTrip(normalizedBuffer, audioChunks);
-  maybeDumpDebugWav(metadata.turnId, normalizedBuffer);
-
-  return {
-    ...metadata,
-    audioFormat: PATHLY_AUDIO_FORMAT,
-    estimatedPlaybackMs: actualPlaybackMs,
-    audioChunks
-  } as unknown as GeneratedAudioMessage<T>;
+  return normalizedBuffer;
 };
 
 export const createGeneratedAudioMessage = <T extends AudioMetadata>(
